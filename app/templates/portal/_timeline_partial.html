@@ -1,0 +1,46 @@
+{# Public portal timeline partial — HTMX swap #}
+{% for event in timeline %}
+<div class="flex gap-4">
+  <div class="flex flex-col items-center">
+    <div class="flex h-8 w-8 items-center justify-center rounded-full shrink-0
+      {% if event.event_type in ['resolved', 'closed'] %}bg-green-100 dark:bg-green-900
+      {% elif event.event_type in ['reply_external', 'reply_customer'] %}bg-blue-100 dark:bg-blue-900
+      {% elif event.event_type == 'sla_breach' %}bg-red-100 dark:bg-red-900
+      {% else %}bg-[var(--bg-surface)]{% endif %}">
+      {% if event.event_type == 'ticket_created' %}
+        <svg class="h-4 w-4" style="color: var(--text-muted);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+        </svg>
+      {% elif event.event_type in ['reply_external', 'reply_customer'] %}
+        <svg class="h-4 w-4 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/>
+        </svg>
+      {% elif event.event_type in ['resolved', 'closed'] %}
+        <svg class="h-4 w-4 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+        </svg>
+      {% else %}
+        <svg class="h-4 w-4" style="color: var(--text-muted);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+      {% endif %}
+    </div>
+    {% if not loop.last %}
+    <div class="mt-1 flex-1 w-px min-h-[16px]" style="background: var(--border-color);"></div>
+    {% endif %}
+  </div>
+  <div class="pb-4 min-w-0 flex-1">
+    <p class="text-sm font-medium" style="color: var(--text-ink);">
+      {% if lang == 'ar' %}{{ event.content_ar or '' }}{% else %}{{ event.content_en or event.content_ar or '' }}{% endif %}
+    </p>
+    {% if event.actor_type == 'customer' %}
+    <p class="text-xs mt-0.5" style="color: var(--text-faint);">{{ t('timeline.customer', lang=lang) }}</p>
+    {% elif event.actor_type == 'agent' %}
+    <p class="text-xs mt-0.5" style="color: var(--text-muted);">{{ t('timeline.support_team', lang=lang) if t('timeline.support_team', lang=lang) != 'timeline.support_team' else ('فريق الدعم' if lang == 'ar' else 'Support Team') }}</p>
+    {% elif event.actor_type == 'system' %}
+    <p class="text-xs mt-0.5" style="color: var(--text-faint);">{{ t('timeline.system', lang=lang) }}</p>
+    {% endif %}
+    <p class="text-xs mt-0.5" style="color: var(--text-faint);">{{ format_date(event.created_at, lang) }}</p>
+  </div>
+</div>
+{% endfor %}

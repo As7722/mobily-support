@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t('ticket.number', lang=lang) }} {{ ticket.ticket_number }} — {{ t('app.title', lang=lang) }}{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-gray-50 dark:bg-gray-950 py-10">
+  <div class="mx-auto max-w-3xl px-4">
+
+    <!-- Header -->
+    <div class="mb-6 flex items-center gap-3">
+      <a href="/portal" class="rounded-lg border p-2 transition" style="border-color: var(--border-color); color: var(--text-muted);">
+        <svg class="h-4 w-4 {% if dir == 'rtl' %}rotate-180{% endif %}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+        </svg>
+      </a>
+      <div>
+        <h1 class="text-lg font-bold font-mono" style="color: var(--text-ink);">{{ ticket.ticket_number }}</h1>
+        <p class="text-sm" style="color: var(--text-muted);">{{ t('ticket.created_at', lang=lang) }}: {{ format_date(ticket.created_at, lang) }}</p>
+      </div>
+    </div>
+
+    <!-- Status Card (Iron Rule #3: No priority, no assignee, no SLA, no routing) -->
+    <div class="card p-5 mb-5">
+      <div class="flex flex-wrap items-center gap-3">
+        {% set status_map = {
+          'new': 'badge-new', 'open': 'badge-open',
+          'pending_customer': 'badge-pending', 'pending_3rd': 'badge-pending',
+          'resolved': 'badge-resolved',
+          'closed': 'badge-closed', 'archived': 'badge-closed'
+        } %}
+        <span class="rounded-full px-3 py-1 text-xs font-semibold {{ status_map.get(ticket.status, 'badge-new') }}">
+          {{ t('ticket.status.' ~ ticket.status, lang=lang) }}
+        </span>
+        {% if ticket.subject %}
+        <span class="text-sm font-medium" style="color: var(--text-ink);">{{ ticket.subject }}</span>
+        {% endif %}
+      </div>
+
+      {% if ticket.description %}
+      <div class="mt-4 rounded-lg p-4 text-sm whitespace-pre-wrap" style="background: var(--bg-surface); color: var(--text-ink);">
+        {{ ticket.description }}
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Timeline + Reply -->
+    <div class="card p-5">
+      <h2 class="text-base font-semibold mb-5" style="color: var(--text-ink);">{{ t('ticket.replies', lang=lang) if t('ticket.replies', lang=lang) != 'ticket.replies' else 'الردود' }}</h2>
+
+      <!-- Timeline (HTMX swap target) -->
+      <div id="portal-timeline" class="space-y-4">
+        {% include "portal/_timeline_partial.html" %}
+      </div>
+
+      <!-- Customer reply area -->
+      {% if ticket.status == 'pending_customer' %}
+      <div id="portal-reply-box" class="mt-6 border-t pt-5" style="border-color: var(--border-color);">
+
+        {% if ticket.status == 'pending_customer' %}
+        <div class="mb-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-4 py-3 flex items-start gap-2 text-sm text-amber-700 dark:text-amber-400">
+          <span class="text-lg leading-none">⏳</span>
+          <span>{{ t('ticket.waiting_your_reply', lang=lang) }}</span>
+        </div>
+        {% endif %}
+
+        <h3 class="text-sm font-semibold mb-3" style="color: var(--text-ink);">{{ t('ticket.add_reply', lang=lang) }}</h3>
+
+        <!-- Success banner (hidden by default, shown via JS after submit) -->
+        <div id="reply-success"
+             class="hidden rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 px-4 py-3 text-sm text-green-700 dark:text-green-400 mb-3 flex items-center gap-2">
+          <span>✅</span>
+          <span>{{ t('ticket.reply_sent', lang=lang) }}</span>
+        </div>
+
+        <!-- Reply form — pure HTMX, no Alpine.js to avoid click/submit race -->
+        <form id="portal-reply-form"
+              hx-post="/api/portal/tickets/{{ ticket.public_token }}/reply"
+              hx-target="#portal-timeline"
+              hx-swap="innerHTML"
+              hx-encoding="multipart/form-data"
+              hx-disabled-elt="#portal-submit-btn"
+              hx-on::after-request="portalReplyDone(event, this)">
+
+          <textarea id="portal-reply-content"
+                    name="content"
+                    rows="4"
+                    placeholder="{{ t('ticket.reply_placeholder', lang=lang) }}"
+                    class="form-input resize-none mb-3 w-full"
+                    required></textarea>
+
+          <!-- Attachment (optional) — visible styled row -->
+          <div class="mb-4 rounded-lg border border-dashed p-3" style="border-color: var(--border-color); background: var(--bg-surface);">
+            <div class="flex items-center gap-3">
+              <svg class="h-5 w-5 flex-shrink-0" style="color: var(--text-faint);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+              </svg>
+              <div class="flex-1 min-w-0">
+                <label for="portal-attachment" class="cursor-pointer text-sm font-medium hover:text-primary-dark transition" style="color: #00AEEF;">
+                  {{ t('ticket.attach_file', lang=lang) }}
+                </label>
+                <p class="text-xs mt-0.5" style="color: var(--text-faint);">JPG, PNG, PDF, DOC, XLS, ZIP — {{ t('portal.max_size', lang=lang) if t('portal.max_size', lang=lang) != 'portal.max_size' else 'الحد الأقصى 10 MB' }}</p>
+              </div>
+              <span id="portal-file-name" class="text-xs font-medium truncate max-w-[150px] hidden" style="color: #00AEEF;"></span>
+              <button type="button" id="portal-file-clear"
+                      class="hidden text-xs text-red-500 hover:text-red-700 flex-shrink-0"
+                      onclick="document.getElementById('portal-attachment').value=''; document.getElementById('portal-file-name').textContent=''; document.getElementById('portal-file-name').classList.add('hidden'); this.classList.add('hidden');">
+                ✕
+              </button>
+            </div>
+            <input type="file"
+                   id="portal-attachment"
+                   name="attachment"
+                   class="mt-2 w-full text-sm file:me-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0
+                          file:text-xs file:font-medium file:cursor-pointer cursor-pointer file:bg-primary file:text-white hover:file:bg-primary-dark"
+                   style="color: var(--text-muted);"
+                   accept=".jpg,.jpeg,.png,.gif,.pdf,.doc,.docx,.xls,.xlsx,.zip,.txt"
+                   onchange="
+                     var n = this.files[0] ? this.files[0].name : '';
+                     var nm = document.getElementById('portal-file-name');
+                     var cl = document.getElementById('portal-file-clear');
+                     if (n) {
+                       nm.textContent = '📎 ' + n;
+                       nm.classList.remove('hidden');
+                       cl.classList.remove('hidden');
+                     } else {
+                       nm.textContent = '';
+                       nm.classList.add('hidden');
+                       cl.classList.add('hidden');
+                     }
+                   ">
+          </div>
+
+          <div class="flex items-center gap-3 flex-wrap">
+            <button type="submit" id="portal-submit-btn" class="btn-primary">
+              <svg class="htmx-indicator h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+              </svg>
+              {{ t('ticket.reply_btn', lang=lang) }}
+            </button>
+            <p class="text-xs" style="color: var(--text-faint);">{{ t('ticket.reply_visible_note', lang=lang) }}</p>
+          </div>
+        </form>
+      </div>
+
+      {% elif ticket.status == 'resolved' %}
+      <div class="mt-6 border-t pt-5 text-center" style="border-color: var(--border-color);">
+        <p class="text-sm text-green-600 dark:text-green-400">✅ {{ t('ticket.resolved_note', lang=lang) }}</p>
+      </div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+
+{% block extra_scripts %}
+<script>
+function portalReplyDone(event, form) {
+  if (event.detail.successful) {
+    /* Clear textarea and file picker */
+    form.reset();
+    var nm = document.getElementById('portal-file-name');
+    var cl = document.getElementById('portal-file-clear');
+    if (nm) { nm.textContent = ''; nm.classList.add('hidden'); }
+    if (cl) { cl.classList.add('hidden'); }
+
+    /* Show success banner for 5 seconds */
+    var banner = document.getElementById('reply-success');
+    if (banner) {
+      banner.classList.remove('hidden');
+      setTimeout(function() { banner.classList.add('hidden'); }, 5000);
+    }
+    /* Scroll timeline into view */
+    var tl = document.getElementById('portal-timeline');
+    if (tl) tl.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }
+}
+</script>
+{% endblock %}
+{% endblock %}

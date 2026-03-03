@@ -1,0 +1,444 @@
+{% extends "base_app.html" %}
+{% block title %}{{ t('nav.tickets', lang=lang) }} — موبايلي{% endblock %}
+{% block page_title %}{{ t('nav.tickets', lang=lang) }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.tkt-page { min-height: calc(100vh - 56px); }
+
+/* ── Queue Tabs ── */
+.tkt-tabs {
+  display: flex; align-items: center; gap: 4px;
+  border-bottom: 2px solid var(--border-color);
+  overflow-x: auto; scrollbar-width: none;
+}
+.tkt-tabs::-webkit-scrollbar { display: none; }
+.tkt-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 9px 16px; font-size: 12.5px; font-weight: 700;
+  cursor: pointer; border: none; background: none;
+  white-space: nowrap; transition: all 0.15s;
+  border-bottom: 2px solid transparent; margin-bottom: -2px;
+  color: var(--text-muted);
+}
+.tkt-tab:hover { color: var(--text-ink); }
+.tkt-tab.active { border-bottom-color: #00AEEF; color: #00AEEF; }
+.tkt-tab .tab-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+
+/* ── Filter bar ── */
+.tkt-filter-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.tkt-filter-select {
+  padding: 5px 10px; border-radius: 6px; font-size: 12px; font-weight: 600;
+  background: var(--bg-surface); border: 1px solid var(--border-color);
+  color: var(--text-ink); cursor: pointer; min-width: 120px;
+}
+.tkt-filter-select:focus { border-color: #00AEEF; outline: none; }
+
+/* ── Bulk Bar ── */
+.bulk-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 14px; border-radius: 8px;
+  background: rgba(0,174,239,0.08); border: 1px solid rgba(0,174,239,0.2);
+}
+.bulk-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 12px; border-radius: 6px; font-size: 11.5px; font-weight: 700;
+  border: 1px solid var(--border-color); background: var(--bg-card);
+  color: var(--text-ink); cursor: pointer; transition: all 0.12s;
+  white-space: nowrap;
+}
+.bulk-btn:hover { border-color: #00AEEF; color: #00AEEF; }
+.bulk-btn svg { width: 14px; height: 14px; }
+
+/* ── Table ── */
+.tkt-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.tkt-table thead th {
+  padding: 9px 16px; font-size: 10.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-faint); text-align: start;
+  border-bottom: 1px solid var(--border-color);
+  position: sticky; top: 0; background: var(--bg-card); z-index: 5;
+}
+.tkt-table tbody tr { transition: background 0.1s; }
+.tkt-table tbody tr:hover { background: var(--bg-surface); }
+.tkt-table tbody td { padding: 10px 16px; vertical-align: middle; }
+
+/* ── Bulk modal ── */
+.bulk-modal-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0,0,0,0.5); backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center;
+}
+.bulk-modal-box {
+  background: var(--bg-card); border: 1px solid var(--border-color);
+  border-radius: 12px; padding: 24px; width: 100%; max-width: 420px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+{% set user = request.state.user if request.state.user else {} %}
+{% set user_role = user.get('role', 'employee') %}
+{% set has_department = user.get('department_id') %}
+{% set is_sup = user_role in ('supervisor', 'manager', 'admin') %}
+
+<div id="tkt-root" class="tkt-page p-5 space-y-3"
+     x-init="$nextTick(() => reloadQueue())"
+     x-data="{
+       activeQueue: '{{ active_queue }}',
+       selected: [],
+       selectAll: false,
+       bulkModal: null,
+       filterAgent: '',
+       filterDept: '',
+       toggleSelect(id, checked) {
+         if (checked) { if (!this.selected.includes(id)) this.selected.push(id); }
+         else { this.selected = this.selected.filter(x => x !== id); }
+       },
+       toggleAll() {
+         this.selectAll = !this.selectAll;
+         document.querySelectorAll('.tkt-checkbox').forEach(cb => {
+           cb.checked = this.selectAll;
+           const id = cb.value;
+           if (this.selectAll && !this.selected.includes(id)) this.selected.push(id);
+         });
+         if (!this.selectAll) this.selected = [];
+       },
+       clearSelection() { this.selected = []; this.selectAll = false;
+         document.querySelectorAll('.tkt-checkbox').forEach(cb => cb.checked = false); },
+       getSelectedIds() { return this.selected.join(','); },
+       buildQueueUrl() {
+         let u = '/api/tickets/queues/' + this.activeQueue;
+         const params = [];
+         if (this.filterAgent) params.push('agent_id=' + this.filterAgent);
+         if (this.filterDept) params.push('dept_id=' + this.filterDept);
+         if (params.length) u += '?' + params.join('&');
+         return u;
+       },
+       reloadQueue() {
+         this.clearSelection();
+         htmx.ajax('GET', this.buildQueueUrl(), {target: '#tkt-tbody', swap: 'innerHTML'});
+       },
+       async doBulk(url, formData) {
+         formData.append('ticket_ids', this.getSelectedIds());
+         const r = await fetch(url, { method:'POST', body: formData });
+         const d = await r.json();
+         if (d.ok) {
+           this.clearSelection(); this.bulkModal = null;
+           this.reloadQueue();
+         }
+       }
+     }">
+
+  <!-- ═══ Header ═════════════════════════════════════════ -->
+  <div class="flex items-center justify-between">
+    <div>
+      <h2 class="text-lg font-bold" style="color:var(--text-ink);">{{ t('nav.tickets', lang=lang) }}</h2>
+      <p class="text-xs mt-0.5" style="color:var(--text-faint);">
+        {{ lang == 'ar' and 'إدارة وتتبع جميع التذاكر والطوابير' or 'Manage and track all tickets and queues' }}
+      </p>
+    </div>
+    {% if is_sup %}
+    <div class="flex items-center gap-2">
+      <a :href="'/api/tickets/bulk/export?queue=' + activeQueue + (filterAgent ? '&agent_id='+filterAgent : '')"
+         class="bulk-btn" style="background:var(--bg-card);">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+        {{ lang == 'ar' and 'تصدير Excel' or 'Export' }}
+      </a>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ═══ Queue Tabs ═════════════════════════════════════ -->
+  <div class="tkt-tabs">
+    <button @click="activeQueue='mine'; $nextTick(() => reloadQueue())"
+            :class="activeQueue==='mine' ? 'active' : ''" class="tkt-tab">
+      <span class="tab-dot" style="background:#3B82F6;"></span>
+      {{ lang == 'ar' and 'تذاكري' or 'My Tickets' }}
+    </button>
+    <button @click="activeQueue='main'; $nextTick(() => reloadQueue())"
+            :class="activeQueue==='main' ? 'active' : ''" class="tkt-tab">
+      <span class="tab-dot" style="background:#10B981;"></span>
+      {{ lang == 'ar' and 'الطابور العام' or 'Main Queue' }}
+    </button>
+    {% if has_department %}
+    <button @click="activeQueue='specialized'; $nextTick(() => reloadQueue())"
+            :class="activeQueue==='specialized' ? 'active' : ''" class="tkt-tab">
+      <span class="tab-dot" style="background:#F59E0B;"></span>
+      {{ lang == 'ar' and 'القسم المختص' or 'Specialized' }}
+    </button>
+    {% endif %}
+    {% if is_sup %}
+    <button @click="activeQueue='supervisor'; $nextTick(() => reloadQueue())"
+            :class="activeQueue==='supervisor' ? 'active' : ''" class="tkt-tab">
+      <span class="tab-dot" style="background:#EF4444;"></span>
+      {{ lang == 'ar' and 'المشرفين' or 'Supervisor' }}
+    </button>
+    {% endif %}
+    {% if user_role in ('manager', 'admin') %}
+    <button @click="activeQueue='manager'; $nextTick(() => reloadQueue())"
+            :class="activeQueue==='manager' ? 'active' : ''" class="tkt-tab">
+      <span class="tab-dot" style="background:#8B5CF6;"></span>
+      {{ lang == 'ar' and 'المدراء' or 'Manager' }}
+    </button>
+    {% endif %}
+    <button @click="activeQueue='internal_tickets'; $nextTick(() => reloadQueue())"
+            :class="activeQueue==='internal_tickets' ? 'active' : ''" class="tkt-tab"
+            style="position:relative;">
+      <span class="tab-dot" style="background:#F59E0B;"></span>
+      {{ lang == 'ar' and 'الداخلية' or 'Internal' }}
+      <span style="font-size:9px;font-weight:800;padding:1px 5px;border-radius:4px;
+                   background:rgba(245,158,11,0.15);color:#F59E0B;letter-spacing:0.03em;
+                   margin-inline-start:4px;">CS-INT</span>
+    </button>
+
+    {% if is_sup %}
+    <div style="flex:1;"></div>
+    <select class="tkt-filter-select" x-model="filterDept" @change="reloadQueue()">
+      <option value="">{{ lang == 'ar' and '— كل الأقسام —' or '— All Depts —' }}</option>
+      {% for dept in departments %}
+      <option value="{{ dept.id }}">{{ dept.name_ar if lang == 'ar' else dept.name_en }}</option>
+      {% endfor %}
+    </select>
+    <select class="tkt-filter-select" x-model="filterAgent" @change="reloadQueue()">
+      <option value="">{{ lang == 'ar' and '— كل الموظفين —' or '— All Agents —' }}</option>
+      {% for ag in agents_list %}
+      <option value="{{ ag.id }}">{{ ag.full_name_ar if lang == 'ar' else (ag.full_name_en or ag.full_name_ar) }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+  </div>
+
+  <!-- ═══ Bulk Actions Bar (appears when items selected) ═════ -->
+  {% if is_sup %}
+  <div x-show="selected.length > 0" x-transition.duration.150ms class="bulk-bar" style="display:none;">
+    <span style="font-size:12px;font-weight:700;color:#00AEEF;" x-text="selected.length + ' {{ lang == 'ar' and 'محدد' or 'selected' }}'"></span>
+    <span style="width:1px;height:18px;background:var(--border-color);"></span>
+
+    <button class="bulk-btn" @click="bulkModal='reassign'">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+      {{ lang == 'ar' and 'تحويل لموظف' or 'Reassign' }}
+    </button>
+
+    <button class="bulk-btn" @click="bulkModal='move_queue'">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859"/></svg>
+      {{ lang == 'ar' and 'نقل لطابور' or 'Move to Queue' }}
+    </button>
+
+    <button class="bulk-btn" @click="bulkModal='move_dept'">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15"/></svg>
+      {{ lang == 'ar' and 'نقل لقسم' or 'Move to Dept' }}
+    </button>
+
+    <button class="bulk-btn" @click="bulkModal='merge'" x-show="selected.length >= 2" style="display:none;color:#8B5CF6;border-color:rgba(139,92,246,0.3);">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>
+      {{ lang == 'ar' and 'دمج' or 'Merge' }}
+    </button>
+
+    <a :href="'/api/tickets/bulk/export?ticket_ids=' + getSelectedIds()" class="bulk-btn">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+      {{ lang == 'ar' and 'تصدير المحدد' or 'Export Selected' }}
+    </a>
+
+    <span style="flex:1;"></span>
+    <button @click="clearSelection()" class="bulk-btn" style="color:var(--text-faint);border-color:transparent;">
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      {{ lang == 'ar' and 'إلغاء' or 'Clear' }}
+    </button>
+  </div>
+  {% endif %}
+
+  <!-- ═══ Table ═════════════════════════════════════════ -->
+  <div style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:12px;overflow:hidden;">
+    <div style="overflow-x:auto;">
+      <table class="tkt-table">
+        <thead>
+          <tr>
+            {% if is_sup %}
+            <th style="width:32px;padding:4px 8px;">
+              <label style="display:flex;align-items:center;justify-content:center;cursor:pointer;">
+                <input type="checkbox" @change="toggleAll()"
+                       style="width:15px;height:15px;accent-color:#00AEEF;cursor:pointer;">
+              </label>
+            </th>
+            {% endif %}
+            <th style="width:4px;padding:0;"></th>
+            <th>{{ t('ticket.number', lang=lang) }}</th>
+            <th>{{ t('ticket.status.label', lang=lang) }}</th>
+            <th>{{ t('ticket.priority.label', lang=lang) }}</th>
+            <th>{{ lang == 'ar' and 'الأهمية' or 'Score' }}</th>
+            <th>SLA</th>
+            <th>{{ t('ticket.assigned_to', lang=lang) }}</th>
+            <th style="width:100px;"></th>
+          </tr>
+        </thead>
+        <tbody id="tkt-tbody">
+          <tr><td colspan="10" class="text-center py-8">
+            <div class="flex items-center justify-center gap-2" style="color:var(--text-faint);">
+              <svg class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" class="opacity-25"></circle><path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" class="opacity-75"></path></svg>
+              <span class="text-xs">{{ t('app.loading', lang=lang) }}</span>
+            </div>
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ═══ Bulk Modals ═══════════════════════════════════ -->
+  {% if is_sup %}
+
+  <!-- Reassign Modal -->
+  <div x-show="bulkModal==='reassign'" x-transition class="bulk-modal-overlay" style="display:none" @click.self="bulkModal=null">
+    <div class="bulk-modal-box" @click.stop>
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <div style="width:36px;height:36px;border-radius:10px;background:rgba(0,174,239,0.12);display:flex;align-items:center;justify-content:center;">
+            <svg style="width:18px;height:18px;color:#00AEEF;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+          </div>
+          <h3 style="font-size:15px;font-weight:700;color:var(--text-ink);">{{ lang == 'ar' and 'تحويل لموظف' or 'Reassign to Agent' }}</h3>
+        </div>
+        <button @click="bulkModal=null" style="background:none;border:none;cursor:pointer;color:var(--text-faint);"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+      </div>
+      <p class="text-xs mb-3" style="color:var(--text-muted);" x-text="selected.length + ' {{ lang == 'ar' and 'تذكرة محددة' or 'tickets selected' }}'"></p>
+      <div x-data="{ bulkAgent: '' }">
+        <label class="form-label">{{ lang == 'ar' and 'اختر الموظف' or 'Select Agent' }}</label>
+        <select x-model="bulkAgent" class="form-input mb-4">
+          <option value="">— {{ t('app.select', lang=lang) }} —</option>
+          {% for ag in agents_list %}
+          <option value="{{ ag.id }}">{{ ag.full_name_ar if lang == 'ar' else (ag.full_name_en or ag.full_name_ar) }}</option>
+          {% endfor %}
+        </select>
+        <div class="flex gap-2">
+          <button @click="if(!bulkAgent) return; const fd = new FormData(); fd.append('agent_id', bulkAgent); doBulk('/api/tickets/bulk/reassign', fd);"
+                  style="flex:1;padding:10px;border-radius:8px;font-size:14px;font-weight:700;color:#fff;border:none;cursor:pointer;background:#00AEEF;">
+            {{ t('app.confirm', lang=lang) }}
+          </button>
+          <button @click="bulkModal=null" class="btn-secondary">{{ t('app.cancel', lang=lang) }}</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Move to Queue Modal -->
+  <div x-show="bulkModal==='move_queue'" x-transition class="bulk-modal-overlay" style="display:none" @click.self="bulkModal=null">
+    <div class="bulk-modal-box" @click.stop>
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <div style="width:36px;height:36px;border-radius:10px;background:rgba(16,185,129,0.12);display:flex;align-items:center;justify-content:center;">
+            <svg style="width:18px;height:18px;color:#10B981;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859"/></svg>
+          </div>
+          <h3 style="font-size:15px;font-weight:700;color:var(--text-ink);">{{ lang == 'ar' and 'نقل لطابور' or 'Move to Queue' }}</h3>
+        </div>
+        <button @click="bulkModal=null" style="background:none;border:none;cursor:pointer;color:var(--text-faint);"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+      </div>
+      <div x-data="{ bulkQueue: 'main' }">
+        <label class="form-label">{{ lang == 'ar' and 'الطابور' or 'Queue' }}</label>
+        <div style="display:flex;flex-direction:column;gap:6px;margin:8px 0 16px;">
+          {% for q, lbl_ar, lbl_en, clr in [('main','الطابور العام','Main Queue','#10B981'),('specialized','القسم المختص','Specialized','#F59E0B'),('supervisor','المشرفين','Supervisor','#EF4444'),('manager','المدراء','Manager','#8B5CF6')] %}
+          <label style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;border:1.5px solid var(--border-color);transition:all 0.12s;"
+                 :style="bulkQueue==='{{ q }}' ? 'border-color:#00AEEF;background:rgba(0,174,239,0.05);' : ''">
+            <input type="radio" value="{{ q }}" x-model="bulkQueue" class="sr-only">
+            <span style="width:8px;height:8px;border-radius:50%;background:{{ clr }};flex-shrink:0;"></span>
+            <span style="font-size:13px;font-weight:600;color:var(--text-ink);">{{ lbl_ar if lang == 'ar' else lbl_en }}</span>
+          </label>
+          {% endfor %}
+        </div>
+        <div class="flex gap-2">
+          <button @click="const fd = new FormData(); fd.append('target_queue', bulkQueue); doBulk('/api/tickets/bulk/move-to-queue', fd);"
+                  style="flex:1;padding:10px;border-radius:8px;font-size:14px;font-weight:700;color:#fff;border:none;cursor:pointer;background:#10B981;">
+            {{ t('app.confirm', lang=lang) }}
+          </button>
+          <button @click="bulkModal=null" class="btn-secondary">{{ t('app.cancel', lang=lang) }}</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Move to Department Modal -->
+  <div x-show="bulkModal==='move_dept'" x-transition class="bulk-modal-overlay" style="display:none" @click.self="bulkModal=null">
+    <div class="bulk-modal-box" @click.stop>
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <div style="width:36px;height:36px;border-radius:10px;background:rgba(245,158,11,0.12);display:flex;align-items:center;justify-content:center;">
+            <svg style="width:18px;height:18px;color:#F59E0B;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15"/></svg>
+          </div>
+          <h3 style="font-size:15px;font-weight:700;color:var(--text-ink);">{{ lang == 'ar' and 'نقل لقسم مختص' or 'Move to Department' }}</h3>
+        </div>
+        <button @click="bulkModal=null" style="background:none;border:none;cursor:pointer;color:var(--text-faint);"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+      </div>
+      <div x-data="{ bulkDept: '' }">
+        <label class="form-label">{{ lang == 'ar' and 'اختر القسم' or 'Select Department' }}</label>
+        <select x-model="bulkDept" class="form-input mb-4">
+          <option value="">— {{ t('app.select', lang=lang) }} —</option>
+          {% for dept in departments %}
+          <option value="{{ dept.id }}">{{ dept.name_ar if lang == 'ar' else dept.name_en }}</option>
+          {% endfor %}
+        </select>
+        <div class="flex gap-2">
+          <button @click="if(!bulkDept) return; const fd = new FormData(); fd.append('target_queue','specialized'); fd.append('department_id', bulkDept); doBulk('/api/tickets/bulk/move-to-queue', fd);"
+                  style="flex:1;padding:10px;border-radius:8px;font-size:14px;font-weight:700;color:#fff;border:none;cursor:pointer;background:#F59E0B;">
+            {{ t('app.confirm', lang=lang) }}
+          </button>
+          <button @click="bulkModal=null" class="btn-secondary">{{ t('app.cancel', lang=lang) }}</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bulk Merge Modal -->
+  <div x-show="bulkModal==='merge'" x-transition class="bulk-modal-overlay" style="display:none" @click.self="bulkModal=null">
+    <div class="bulk-modal-box" @click.stop>
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <div style="width:36px;height:36px;border-radius:10px;background:rgba(139,92,246,0.12);display:flex;align-items:center;justify-content:center;">
+            <svg style="width:18px;height:18px;color:#8B5CF6;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>
+          </div>
+          <div>
+            <h3 style="font-size:15px;font-weight:700;color:var(--text-ink);">{{ lang == 'ar' and 'دمج التذاكر' or 'Merge Tickets' }}</h3>
+            <p style="font-size:11px;color:var(--text-faint);margin-top:2px;">{{ lang == 'ar' and 'التذكرة الأولى ستكون الأساسية والباقي سيُغلق' or 'First selected ticket becomes primary, others will be closed' }}</p>
+          </div>
+        </div>
+        <button @click="bulkModal=null" style="background:none;border:none;cursor:pointer;color:var(--text-faint);"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+      </div>
+      <p class="text-xs mb-3" style="color:var(--text-muted);" x-text="selected.length + ' {{ lang == 'ar' and 'تذكرة محددة' or 'tickets selected' }}'"></p>
+      <p style="font-size:11px;color:var(--text-faint);margin-bottom:12px;">
+        <svg class="h-3 w-3 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+        {{ lang == 'ar' and 'التذاكر المدمجة ستُغلق نهائياً. لا يمكن التراجع.' or 'Merged tickets will be permanently closed. Cannot be undone.' }}
+      </p>
+      <div x-data="{ mergeReason: '' }">
+        <label class="form-label">{{ lang == 'ar' and 'سبب الدمج (اختياري)' or 'Merge reason (optional)' }}</label>
+        <textarea x-model="mergeReason" rows="2" class="form-input resize-none w-full mb-4"
+                  placeholder="{{ lang == 'ar' and 'سبب الدمج...' or 'Reason for merging...' }}"></textarea>
+        <div class="flex gap-2">
+          <button @click="
+            const ids = selected.slice();
+            const fd = new FormData();
+            fd.append('primary_id', ids[0]);
+            fd.append('secondary_ids', ids.slice(1).join(','));
+            fd.append('reason', mergeReason);
+            doBulk('/api/tickets/merge', fd);
+          " style="flex:1;padding:10px;border-radius:8px;font-size:14px;font-weight:700;color:#fff;border:none;cursor:pointer;background:#8B5CF6;">
+            {{ lang == 'ar' and 'تأكيد الدمج' or 'Confirm Merge' }}
+          </button>
+          <button @click="bulkModal=null" class="btn-secondary">{{ t('app.cancel', lang=lang) }}</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% endif %}
+
+</div>
+
+<script>
+document.getElementById('tkt-tbody').addEventListener('change', function(e) {
+  if (!e.target.classList.contains('tkt-checkbox')) return;
+  var root = document.getElementById('tkt-root');
+  var comp = Alpine.$data(root);
+  comp.toggleSelect(e.target.value, e.target.checked);
+});
+</script>
+{% endblock %}

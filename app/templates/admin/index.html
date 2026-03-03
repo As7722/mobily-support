@@ -1,0 +1,1071 @@
+{% extends "base_app.html" %}
+{% block title %}{{ t('adm.title', lang=lang) }} — موبايلي{% endblock %}
+{% block page_title %}{{ t('adm.title', lang=lang) }}{% endblock %}
+
+{% block content %}
+<div class="p-6"
+     x-data="{ activeTab: '{{ active_tab }}', testMode: false }">
+
+  <!-- Tab Navigation (scroll on small screens) -->
+  <div class="overflow-x-auto -mx-6 px-6 mb-6">
+    <div class="flex gap-1 rounded-xl p-1 shadow-sm w-max min-w-full" style="background: var(--bg-card); border: 1px solid var(--border-color);">
+      {% for tab_id, tab_key, icon in [
+        ('branding',     'adm.tab_branding',     '🎨'),
+        ('users',        'adm.tab_users',         '👥'),
+        ('integrations', 'adm.tab_integrations',  '🔌'),
+        ('domain',       'adm.tab_domain',         '🌐'),
+        ('security',     'adm.tab_security',      '🔒'),
+        ('flags',        'adm.tab_flags',          '🚩'),
+        ('backup',       'adm.tab_backup',         '💾'),
+        ('health',       'adm.tab_health',         '❤️'),
+        ('db',           'adm.tab_db',             '🗄')
+      ] %}
+      <button @click="activeTab = '{{ tab_id }}'"
+              :style="activeTab === '{{ tab_id }}' ? 'background: #00AEEF; color: white;' : 'color: var(--text-muted);'"
+              :class="activeTab === '{{ tab_id }}' ? 'shadow-sm' : 'hover:bg-[var(--bg-surface)]'"
+              class="flex-shrink-0 flex items-center gap-1.5 rounded-lg px-3 py-2.5 text-sm font-semibold transition-all whitespace-nowrap">
+        <span>{{ icon }}</span> {{ t(tab_key, lang=lang) }}
+      </button>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- ══ TAB: BRANDING ════════════════════════════════════════════════════ -->
+  <div x-show="activeTab === 'branding'" x-transition>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- Logo + Colors -->
+      <div class="card p-6 space-y-5">
+        <h3 class="text-sm font-semibold" style="color: var(--text-ink);">{{ t('adm.tab_branding', lang=lang) }}</h3>
+        <div>
+          <label class="form-label">{{ t('adm.logo_upload', lang=lang) }}</label>
+          <div class="mt-2 flex items-center gap-4">
+            <div class="h-16 w-16 rounded-xl border-2 border-dashed flex items-center justify-center text-2xl" style="border-color: var(--border-color);">
+              {% if branding.logo_url %}
+              <img src="{{ branding.logo_url }}" class="h-full w-full object-contain rounded-lg">
+              {% else %}🖼{% endif %}
+            </div>
+            <label class="btn-secondary text-xs py-1.5 cursor-pointer">
+              {{ t('adm.logo_upload', lang=lang) }}
+              <input type="file" accept="image/*" class="sr-only"
+                     hx-post="/api/admin/branding/logo" hx-encoding="multipart/form-data"
+                     hx-target="#logo-result" hx-swap="innerHTML">
+            </label>
+          </div>
+          <div id="logo-result"></div>
+        </div>
+        <form hx-post="/api/admin/branding" hx-target="#branding-result" hx-swap="innerHTML" class="space-y-4">
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="form-label">{{ t('adm.primary_color', lang=lang) }}</label>
+              <div class="flex items-center gap-2">
+                <input type="color" name="primary_color" value="{{ branding.primary_color or '#6366f1' }}"
+                       class="h-9 w-16 rounded-lg border cursor-pointer" style="border-color: var(--border-color);">
+                <input type="text" name="primary_color_hex" value="{{ branding.primary_color or '#6366f1' }}"
+                       class="form-input text-xs flex-1" dir="ltr">
+              </div>
+            </div>
+            <div>
+              <label class="form-label">{{ t('adm.secondary_color', lang=lang) }}</label>
+              <div class="flex items-center gap-2">
+                <input type="color" name="secondary_color" value="{{ branding.secondary_color or '#22c55e' }}"
+                       class="h-9 w-16 rounded-lg border cursor-pointer" style="border-color: var(--border-color);">
+                <input type="text" name="secondary_color_hex" value="{{ branding.secondary_color or '#22c55e' }}"
+                       class="form-input text-xs flex-1" dir="ltr">
+              </div>
+            </div>
+          </div>
+          <button type="submit" class="btn-primary text-sm">{{ t('app.save', lang=lang) }}</button>
+        </form>
+        <div id="branding-result"></div>
+      </div>
+
+      <!-- Seasonal Theme Scheduler — MANUAL ONLY, Timezone: Asia/Riyadh -->
+      {%- set s_deactivate  = '⏹ إيقاف المظهر'   if lang == 'ar' else '⏹ Deactivate' -%}
+      {%- set s_activate    = '▶ تفعيل'           if lang == 'ar' else '▶ Activate' -%}
+      {%- set s_edit_title  = 'تعديل المظهر'      if lang == 'ar' else 'Edit Theme' -%}
+      {%- set s_add_title   = 'إضافة مظهر موسمي' if lang == 'ar' else 'Add Seasonal Theme' -%}
+      {%- set s_saving      = 'جارٍ الحفظ...'     if lang == 'ar' else 'Saving...' -%}
+      {%- set s_save_theme  = 'حفظ المظهر'        if lang == 'ar' else 'Save Theme' -%}
+      <script>window._adminThemes = {{ themes | tojson | safe }};</script>
+      <div class="card p-6" x-data="themeScheduler()">
+
+        <!-- Header -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <div>
+            <h3 class="text-sm font-semibold" style="color: var(--text-ink);margin:0;">
+              {{ lang == 'ar' and 'المظاهر الموسمية' or 'Seasonal Themes' }}
+            </h3>
+            <p style="font-size:10px;color:var(--text-faint);margin:3px 0 0;">
+              🕐 {{ lang == 'ar' and 'التوقيت: توقيت الرياض (UTC+3)' or 'Timezone: Riyadh (UTC+3)' }}
+              &nbsp;·&nbsp;
+              {{ lang == 'ar' and 'التفعيل يدوي فقط' or 'Manual activation only' }}
+            </p>
+          </div>
+          <button @click="openNew()"
+                  style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:9px;
+                         border:none;background:linear-gradient(135deg,#00AEEF,#0084b4);color:#fff;
+                         font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 3px 10px rgba(0,174,239,0.3);">
+            + {{ lang == 'ar' and 'إضافة مظهر' or 'Add Theme' }}
+          </button>
+        </div>
+
+        <!-- Info note -->
+        <div style="background:rgba(0,174,239,0.07);border:1px solid rgba(0,174,239,0.2);border-radius:8px;
+                    padding:9px 14px;margin-bottom:16px;font-size:11px;color:#00AEEF;font-weight:600;">
+          ℹ️ {{ lang == 'ar' and 'يُطبَّق المظهر فور الضغط على "تفعيل" ويُلغى فور الضغط على "إيقاف المظهر". لا يمكن تفعيل أكثر من مظهر في نفس الوقت.' or 'Theme applies immediately on "Activate" and stops on "Deactivate". Only one theme can be active at a time.' }}
+        </div>
+
+        <!-- Theme list -->
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <template x-for="th in themes" :key="th.id">
+            <div :style="th.is_active ? 'border-color:rgba(16,185,129,0.5);background:rgba(16,185,129,0.04);' : ''"
+                 style="display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:12px;
+                        border:1.5px solid var(--border-color);background:var(--bg-surface);transition:all 0.2s;">
+              <!-- Color swatch -->
+              <div style="width:40px;height:40px;border-radius:10px;flex-shrink:0;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.2);">
+                <div :style="'width:100%;height:50%;background:'+th.primary_color"></div>
+                <div :style="'width:100%;height:50%;background:'+th.secondary_color"></div>
+              </div>
+              <!-- Name & dates -->
+              <div style="flex:1;min-width:0;">
+                <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;">
+                  <span x-text="th.icon_emoji" style="font-size:16px;"></span>
+                  <span x-text="th.name_ar" style="font-size:13px;font-weight:800;color:var(--text-ink);"></span>
+                  <!-- ACTIVE badge -->
+                  <span x-show="th.is_active"
+                        style="font-size:10px;font-weight:800;padding:2px 9px;border-radius:20px;
+                               background:rgba(16,185,129,0.15);color:#10B981;border:1px solid rgba(16,185,129,0.3);">
+                    ● {{ lang == 'ar' and 'مفعّل الآن' or 'ACTIVE' }}
+                  </span>
+                </div>
+                <p x-text="'📅 ' + (th.starts_at||'').substring(0,16).replace('T',' ') + '  →  ' + (th.ends_at||'').substring(0,16).replace('T',' ') + '  (توقيت الرياض)'"
+                   style="font-size:10px;color:var(--text-faint);margin-top:3px;direction:ltr;text-align:start;"></p>
+              </div>
+              <!-- Actions -->
+              <div style="display:flex;align-items:center;gap:7px;flex-shrink:0;">
+
+                <!-- DEACTIVATE — prominent red button -->
+                <button x-show="th.is_active" @click="toggle(th)"
+                        style="display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border-radius:8px;
+                               border:2px solid #EF4444;background:rgba(239,68,68,0.12);color:#EF4444;
+                               font-size:12px;font-weight:800;cursor:pointer;transition:all 0.15s;white-space:nowrap;"
+                        onmouseover="this.style.background='rgba(239,68,68,0.25)'"
+                        onmouseout="this.style.background='rgba(239,68,68,0.12)'">
+                  ⏹ {{ lang == 'ar' and 'إيقاف المظهر' or 'Deactivate' }}
+                </button>
+
+                <!-- ACTIVATE — green button -->
+                <button x-show="!th.is_active" @click="toggle(th)"
+                        style="display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border-radius:8px;
+                               border:2px solid rgba(16,185,129,0.5);background:rgba(16,185,129,0.1);color:#10B981;
+                               font-size:12px;font-weight:800;cursor:pointer;transition:all 0.15s;white-space:nowrap;"
+                        onmouseover="this.style.background='rgba(16,185,129,0.22)'"
+                        onmouseout="this.style.background='rgba(16,185,129,0.1)'">
+                  ▶ {{ lang == 'ar' and 'تفعيل' or 'Activate' }}
+                </button>
+
+                <!-- Edit -->
+                <button @click="openEdit(th)"
+                        style="padding:7px 12px;border-radius:8px;border:1.5px solid var(--border-color);
+                               background:var(--bg-surface);color:var(--text-muted);font-size:11px;font-weight:700;cursor:pointer;">
+                  ✏️
+                </button>
+
+                <!-- Delete -->
+                <button @click="del(th.id)"
+                        style="padding:7px 10px;border-radius:8px;border:1.5px solid rgba(239,68,68,0.25);
+                               background:rgba(239,68,68,0.06);color:#EF4444;font-size:11px;cursor:pointer;">✕</button>
+              </div>
+            </div>
+          </template>
+          <div x-show="themes.length === 0"
+               style="text-align:center;color:var(--text-faint);padding:30px;font-size:12px;border:1.5px dashed var(--border-color);border-radius:10px;">
+            🎨 {{ lang == 'ar' and 'لا توجد مظاهر موسمية — أضف أول مظهر' or 'No seasonal themes yet — add your first theme' }}
+          </div>
+        </div>
+
+        <!-- ── ADD/EDIT MODAL ── -->
+        <div x-show="showModal" x-transition
+             style="position:fixed;inset:0;z-index:9000;display:flex;align-items:center;justify-content:center;
+                    background:rgba(0,0,0,0.65);backdrop-filter:blur(6px);"
+             @click.self="showModal=false">
+          <div style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:18px;
+                      width:100%;max-width:580px;max-height:92vh;overflow-y:auto;padding:28px;
+                      box-shadow:0 24px 70px rgba(0,0,0,0.55);">
+
+            <!-- Modal Header -->
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:22px;">
+              <div>
+                <h3 style="font-size:16px;font-weight:900;color:var(--text-ink);margin:0;">
+                  <span x-text="editId ? '{{ s_edit_title }}' : '{{ s_add_title }}'"></span>
+                </h3>
+                <p style="font-size:11px;color:var(--text-muted);margin-top:4px;">
+                  🕐 {{ lang == 'ar' and 'التواريخ بتوقيت الرياض (UTC+3)' or 'Dates in Riyadh time (UTC+3)' }}
+                </p>
+              </div>
+              <button @click="showModal=false"
+                      style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);
+                             border-radius:7px;cursor:pointer;color:#EF4444;font-size:14px;
+                             width:30px;height:30px;display:flex;align-items:center;justify-content:center;">✕</button>
+            </div>
+
+            <!-- Alert -->
+            <div x-show="msg" x-transition
+                 :style="msgOk ? 'background:rgba(16,185,129,0.09);border-color:rgba(16,185,129,0.3);color:#10B981;'
+                               : 'background:rgba(239,68,68,0.09);border-color:rgba(239,68,68,0.3);color:#EF4444;'"
+                 style="padding:10px 14px;border-radius:9px;border:1px solid;font-size:12px;font-weight:700;margin-bottom:16px;"
+                 x-text="msg"></div>
+
+            <!-- Form -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+
+              <!-- Name AR -->
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text-muted);display:block;margin-bottom:5px;">
+                  {{ lang == 'ar' and 'الاسم بالعربية' or 'Name (Arabic)' }} *
+                </label>
+                <input x-model="form.name_ar" type="text" dir="rtl"
+                       style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;
+                              background:var(--input-bg);border:1.5px solid var(--border-color);
+                              color:var(--text-ink);font-size:13px;outline:none;">
+              </div>
+
+              <!-- Name EN -->
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text-muted);display:block;margin-bottom:5px;">
+                  Name (English) *
+                </label>
+                <input x-model="form.name_en" type="text" dir="ltr"
+                       style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;
+                              background:var(--input-bg);border:1.5px solid var(--border-color);
+                              color:var(--text-ink);font-size:13px;outline:none;">
+              </div>
+
+              <!-- Icon -->
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text-muted);display:block;margin-bottom:5px;">
+                  {{ lang == 'ar' and 'الأيقونة (Emoji)' or 'Icon (Emoji)' }}
+                </label>
+                <input x-model="form.icon_emoji" type="text" maxlength="4" placeholder="🌙"
+                       style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;
+                              background:var(--input-bg);border:1.5px solid var(--border-color);
+                              color:var(--text-ink);font-size:20px;outline:none;text-align:center;">
+              </div>
+
+              <!-- Primary color -->
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text-muted);display:block;margin-bottom:5px;">
+                  {{ lang == 'ar' and 'اللون الرئيسي' or 'Primary Color' }}
+                </label>
+                <div style="display:flex;gap:8px;align-items:center;">
+                  <input type="color" x-model="form.primary_color"
+                         style="width:40px;height:36px;border-radius:7px;border:1px solid var(--border-color);cursor:pointer;padding:2px;">
+                  <input type="text" x-model="form.primary_color" dir="ltr" maxlength="7"
+                         style="flex:1;padding:9px 10px;border-radius:8px;background:var(--input-bg);
+                                border:1.5px solid var(--border-color);color:var(--text-ink);font-size:13px;outline:none;">
+                </div>
+              </div>
+
+              <!-- Secondary color -->
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text-muted);display:block;margin-bottom:5px;">
+                  {{ lang == 'ar' and 'اللون الثانوي' or 'Secondary Color' }}
+                </label>
+                <div style="display:flex;gap:8px;align-items:center;">
+                  <input type="color" x-model="form.secondary_color"
+                         style="width:40px;height:36px;border-radius:7px;border:1px solid var(--border-color);cursor:pointer;padding:2px;">
+                  <input type="text" x-model="form.secondary_color" dir="ltr" maxlength="7"
+                         style="flex:1;padding:9px 10px;border-radius:8px;background:var(--input-bg);
+                                border:1.5px solid var(--border-color);color:var(--text-ink);font-size:13px;outline:none;">
+                </div>
+              </div>
+
+              <!-- Starts at (Riyadh time) -->
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text-muted);display:block;margin-bottom:5px;">
+                  📅 {{ lang == 'ar' and 'تاريخ البدء (توقيت الرياض)' or 'Starts At (Riyadh time)' }}
+                </label>
+                <input type="datetime-local" x-model="form.starts_at"
+                       style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;
+                              background:var(--input-bg);border:1.5px solid var(--border-color);
+                              color:var(--text-ink);font-size:12px;outline:none;">
+              </div>
+
+              <!-- Ends at (Riyadh time) -->
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text-muted);display:block;margin-bottom:5px;">
+                  📅 {{ lang == 'ar' and 'تاريخ الانتهاء (توقيت الرياض)' or 'Ends At (Riyadh time)' }}
+                </label>
+                <input type="datetime-local" x-model="form.ends_at"
+                       style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;
+                              background:var(--input-bg);border:1.5px solid var(--border-color);
+                              color:var(--text-ink);font-size:12px;outline:none;">
+              </div>
+
+              <!-- Welcome AR -->
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text-muted);display:block;margin-bottom:5px;">
+                  {{ lang == 'ar' and 'رسالة ترحيب (عربي)' or 'Welcome Message (AR)' }}
+                </label>
+                <input x-model="form.welcome_message_ar" type="text" dir="rtl"
+                       style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;
+                              background:var(--input-bg);border:1.5px solid var(--border-color);
+                              color:var(--text-ink);font-size:13px;outline:none;">
+              </div>
+
+              <!-- Welcome EN -->
+              <div>
+                <label style="font-size:11px;font-weight:700;color:var(--text-muted);display:block;margin-bottom:5px;">
+                  Welcome Message (EN)
+                </label>
+                <input x-model="form.welcome_message_en" type="text" dir="ltr"
+                       style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;
+                              background:var(--input-bg);border:1.5px solid var(--border-color);
+                              color:var(--text-ink);font-size:13px;outline:none;">
+              </div>
+
+            </div>
+
+            <!-- Color preview strip -->
+            <div style="margin-top:16px;border-radius:10px;overflow:hidden;height:10px;
+                        display:flex;" x-show="form.primary_color && form.secondary_color">
+              <div :style="'flex:1;background:'+form.primary_color"></div>
+              <div :style="'flex:1;background:'+form.secondary_color"></div>
+              <div :style="'flex:1;background:'+form.primary_color"></div>
+            </div>
+
+            <!-- Footer buttons -->
+            <div style="display:flex;gap:10px;margin-top:22px;">
+              <button @click="showModal=false"
+                      style="padding:11px 20px;border-radius:9px;background:var(--bg-surface);
+                             border:1.5px solid var(--border-color);color:var(--text-muted);
+                             font-size:13px;font-weight:700;cursor:pointer;">
+                {{ lang == 'ar' and 'إلغاء' or 'Cancel' }}
+              </button>
+              <button @click="save()" :disabled="saving || !form.name_ar"
+                      style="flex:1;padding:11px;border-radius:9px;border:none;cursor:pointer;
+                             background:linear-gradient(135deg,#00AEEF,#0084b4);color:#fff;
+                             font-size:13px;font-weight:800;box-shadow:0 4px 14px rgba(0,174,239,0.3);
+                             display:flex;align-items:center;justify-content:center;gap:7px;"
+                      :style="(saving||!form.name_ar) ? 'opacity:0.4;cursor:not-allowed;' : ''">
+                <svg x-show="!saving" style="width:14px;height:14px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <span x-text="saving ? '{{ s_saving }}' : '{{ s_save_theme }}'"></span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ TAB: USERS & PERMISSIONS → unified page ═══════════════════════════ -->
+  <div x-show="activeTab === 'users'" x-transition>
+    <div class="card p-6">
+      <h3 class="text-sm font-semibold mb-3" style="color: var(--text-ink);">{{ t('adm.perm_matrix', lang=lang) }}</h3>
+      <p class="text-sm mb-5" style="color: var(--text-muted);">{{ t('adm.perm_unified_msg', lang=lang) }}</p>
+      <a href="/manager/permissions"
+         class="inline-flex items-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition-all"
+         style="background: linear-gradient(135deg, #00AEEF, #0084b4); color: #fff; box-shadow: 0 3px 12px rgba(0,174,239,0.35);">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/>
+        </svg>
+        {{ t('adm.perm_open_page', lang=lang) }}
+      </a>
+    </div>
+  </div>
+
+  <!-- ══ TAB: INTEGRATIONS ════════════════════════════════════════════════ -->
+  <div x-show="activeTab === 'integrations'" x-transition>
+
+    {# ─── integration definitions ─── #}
+    {%- set _integrations = [
+      ('smtp',      '📧', 'SMTP (البريد الإلكتروني)',
+        [('host','الخادم (Host)','text','mail.example.com'),
+         ('port','المنفذ (Port)','number','587'),
+         ('username','اسم المستخدم','text','no-reply@example.com'),
+         ('password','كلمة المرور','password','')],
+        'يُستخدم لإرسال إشعارات البريد الإلكتروني وتقارير SLA.'
+      ),
+      ('whatsapp',  '💬', 'WhatsApp Business (Meta)',
+        [('phone_number_id','Phone Number ID','text',''),
+         ('access_token','Access Token','password',''),
+         ('business_account_id','Business Account ID','text',''),
+         ('webhook_verify_token','Webhook Verify Token','password',''),
+         ('template_namespace','Template Namespace','text','')],
+        'Meta WhatsApp Business API — يُستخدم لإرسال إشعارات فورية للعملاء عبر واتساب.'
+      ),
+      ('twilio',    '📱', 'Twilio (SMS)',
+        [('account_sid','Account SID','text',''),
+         ('auth_token','Auth Token','password',''),
+         ('from_number','From Number','text','+966xxxxxxxxx')],
+        'يُستخدم لإرسال رسائل SMS للإشعارات والتنبيهات.'
+      ),
+      ('s3',        '☁️', 'S3 / Object Storage (المرفقات)',
+        [('endpoint','Endpoint URL','text','https://s3.amazonaws.com'),
+         ('bucket','Bucket Name','text',''),
+         ('region','Region','text','me-south-1'),
+         ('access_key','Access Key','text',''),
+         ('secret_key','Secret Key','password','')],
+        'يُستخدم لتخزين مرفقات التذاكر والصور.'
+      ),
+    ] -%}
+
+    <div style="display:flex;flex-direction:column;gap:16px;">
+      {% for svc_id, icon, svc_name, fields, svc_desc in _integrations %}
+      {%- set svc_key = svc_id -%}
+      <div class="card" style="padding:0;overflow:hidden;"
+           x-data="{ open: false, saving: false, saveMsg: '', saveOk: true, testing: false, testMsg: '' }">
+
+        <!-- Card Header -->
+        <div @click="open=!open" style="display:flex;align-items:center;justify-content:space-between;
+                                         padding:16px 20px;cursor:pointer;transition:background 0.15s;"
+             :style="open ? 'background:rgba(0,174,239,0.04);' : ''"
+             onmouseover="this.style.background='rgba(0,174,239,0.04)'"
+             onmouseout="this.style.background=open?'rgba(0,174,239,0.04)':''">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div style="width:40px;height:40px;border-radius:10px;
+                        background:rgba(0,174,239,0.1);border:1px solid rgba(0,174,239,0.2);
+                        display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;">
+              {{ icon }}
+            </div>
+            <div>
+              <div style="font-size:13px;font-weight:800;color:var(--text-ink);">{{ svc_name }}</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">{{ svc_desc }}</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            {# Status indicator — show if at least one key is configured #}
+            {% if integrations.get(svc_key + '.' + fields[0][0], '') %}
+            <span style="font-size:10px;font-weight:700;padding:3px 9px;border-radius:20px;
+                         background:rgba(16,185,129,0.12);color:#10B981;border:1px solid rgba(16,185,129,0.25);">
+              ● {{ lang == 'ar' and 'مُهيَّأ' or 'Configured' }}
+            </span>
+            {% else %}
+            <span style="font-size:10px;font-weight:700;padding:3px 9px;border-radius:20px;
+                         background:rgba(245,158,11,0.1);color:#F59E0B;border:1px solid rgba(245,158,11,0.2);">
+              ○ {{ lang == 'ar' and 'غير مُهيَّأ' or 'Not configured' }}
+            </span>
+            {% endif %}
+            <span :style="open ? 'transform:rotate(180deg)' : ''"
+                  style="transition:transform 0.2s;color:var(--text-muted);font-size:12px;">▼</span>
+          </div>
+        </div>
+
+        <!-- Collapsible Body -->
+        <div x-show="open" x-collapse style="border-top:1px solid var(--border-color);padding:20px;">
+
+          <!-- Save feedback -->
+          <div x-show="saveMsg" x-transition
+               :style="saveOk ? 'background:rgba(16,185,129,0.08);border-color:rgba(16,185,129,0.3);color:#10B981;'
+                               : 'background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.3);color:#EF4444;'"
+               style="padding:9px 14px;border-radius:8px;border:1px solid;font-size:12px;font-weight:700;margin-bottom:14px;"
+               x-text="saveMsg"></div>
+
+          <form @submit.prevent="
+            saving=true; saveMsg='';
+            const fd = new FormData($el);
+            fetch('/api/admin/integrations/{{ svc_id }}', {method:'POST', body:fd})
+              .then(r=>r.json())
+              .then(d=>{ saving=false; saveOk=d.ok; saveMsg=d.message||d.error||''; })
+              .catch(()=>{ saving=false; saveOk=false; saveMsg='خطأ في الاتصال'; });
+          ">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+              {% for name, label, ftype, placeholder in fields %}
+              <div {% if loop.last and loop.index is odd %}style="grid-column:span 2"{% endif %}>
+                <label style="font-size:11px;font-weight:700;color:var(--text-muted);display:block;margin-bottom:5px;">
+                  {{ label }}
+                </label>
+                <input type="{{ ftype }}" name="{{ name }}"
+                       placeholder="{{ placeholder }}" dir="ltr"
+                       value="{{ integrations.get(svc_key + '.' + name, '') if ftype != 'password' else '' }}"
+                       {% if ftype == 'password' %}
+                       placeholder="{{ '••••••••' if integrations.get(svc_key + '.' + name, '') else placeholder }}"
+                       {% endif %}
+                       style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;
+                              background:var(--input-bg);border:1.5px solid var(--border-color);
+                              color:var(--text-ink);font-size:12px;outline:none;font-family:monospace;">
+              </div>
+              {% endfor %}
+            </div>
+
+            <!-- Buttons -->
+            <div style="display:flex;align-items:center;gap:10px;">
+              <button type="submit" :disabled="saving"
+                      style="display:inline-flex;align-items:center;gap:6px;padding:9px 20px;border-radius:9px;
+                             border:none;background:linear-gradient(135deg,#00AEEF,#0084b4);color:#fff;
+                             font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 3px 10px rgba(0,174,239,0.25);"
+                      :style="saving ? 'opacity:0.6;cursor:not-allowed;' : ''">
+                <svg x-show="saving" style="width:13px;height:13px;animation:spin 1s linear infinite;" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
+                <span x-text="saving ? '{{ lang == 'ar' and 'جارٍ الحفظ...' or 'Saving...' }}' : '{{ lang == 'ar' and 'حفظ الإعدادات' or 'Save Settings' }}'"></span>
+              </button>
+
+              <button type="button" @click="
+                testing=true; testMsg='';
+                fetch('/api/admin/integrations/{{ svc_id }}/test', {method:'POST'})
+                  .then(r=>r.text())
+                  .then(html=>{ testing=false; testMsg=html; })
+                  .catch(()=>{ testing=false; testMsg='<span style=color:#ef4444>فشل الاختبار</span>'; });
+              " :disabled="testing"
+                      style="display:inline-flex;align-items:center;gap:6px;padding:9px 16px;border-radius:9px;
+                             border:1.5px solid var(--border-color);background:var(--bg-surface);
+                             color:var(--text-muted);font-size:12px;font-weight:700;cursor:pointer;">
+                <span x-text="testing ? '...' : '🔌 {{ lang == 'ar' and 'اختبار الاتصال' or 'Test Connection' }}'"></span>
+              </button>
+
+              <span x-show="testMsg" x-html="testMsg" style="font-size:12px;font-weight:700;"></span>
+            </div>
+          </form>
+
+          {# WhatsApp — extra help #}
+          {% if svc_id == 'whatsapp' %}
+          <div style="margin-top:16px;padding:12px 16px;border-radius:9px;
+                      background:rgba(37,211,102,0.07);border:1px solid rgba(37,211,102,0.2);">
+            <p style="font-size:11px;color:#25D366;font-weight:700;margin-bottom:4px;">💬 Meta WhatsApp Business API</p>
+            <p style="font-size:11px;color:var(--text-muted);line-height:1.6;">
+              {{ lang == 'ar' and 'احصل على بيانات التكامل من Meta for Developers →' or 'Get credentials from Meta for Developers →' }}
+              <a href="https://developers.facebook.com/docs/whatsapp/cloud-api" target="_blank"
+                 style="color:#25D366;text-decoration:underline;">developers.facebook.com</a>
+            </p>
+          </div>
+          {% endif %}
+
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- ══ TAB: DOMAIN & SSL ════════════════════════════════════════════════ -->
+  <div x-show="activeTab === 'domain'" x-transition>
+    <div style="display:flex;flex-direction:column;gap:16px;">
+
+      <!-- Domain card -->
+      <div class="card p-6">
+        <h3 style="font-size:14px;font-weight:800;color:var(--text-ink);margin:0 0 16px;">
+          🌐 {{ lang == 'ar' and 'النطاق المخصص' or 'Custom Domain' }}
+        </h3>
+
+        <div id="domain-msg" style="display:none;padding:10px 14px;border-radius:8px;
+             font-size:12px;font-weight:700;margin-bottom:14px;border:1px solid;"></div>
+
+        <div style="display:flex;gap:10px;align-items:flex-end;">
+          <div style="flex:1;">
+            <label style="font-size:11px;font-weight:700;color:var(--text-muted);display:block;margin-bottom:6px;">
+              {{ lang == 'ar' and 'عنوان النطاق' or 'Domain URL' }}
+            </label>
+            <input type="text" id="domain-input" dir="ltr" placeholder="support.example.com"
+                   value="{{ domain_config.domain or '' }}"
+                   style="width:100%;box-sizing:border-box;padding:10px 14px;border-radius:9px;
+                          background:var(--input-bg);border:1.5px solid var(--border-color);
+                          color:var(--text-ink);font-size:13px;outline:none;font-family:monospace;">
+          </div>
+          <button onclick="saveDomain(this)"
+                  style="padding:10px 24px;border-radius:9px;border:none;cursor:pointer;
+                         background:linear-gradient(135deg,#00AEEF,#0084b4);color:#fff;
+                         font-size:13px;font-weight:700;white-space:nowrap;flex-shrink:0;
+                         box-shadow:0 3px 10px rgba(0,174,239,0.3);">
+            💾 {{ lang == 'ar' and 'حفظ النطاق' or 'Save Domain' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- SSL card -->
+      <div class="card p-6">
+        <h3 style="font-size:14px;font-weight:800;color:var(--text-ink);margin:0 0 16px;">
+          🔒 SSL Certificate
+        </h3>
+
+        <div id="ssl-msg" style="display:none;padding:10px 14px;border-radius:8px;
+             font-size:12px;font-weight:700;margin-bottom:14px;border:1px solid;"></div>
+
+        <div style="display:flex;align-items:center;gap:14px;">
+          <div style="display:flex;align-items:center;gap:8px;flex:1;">
+            {% if domain_config.ssl_valid %}
+            <span style="font-size:20px;">✅</span>
+            <div>
+              <p style="font-size:13px;font-weight:700;color:#10B981;margin:0;">
+                {{ lang == 'ar' and 'الشهادة صالحة' or 'Certificate valid' }}
+              </p>
+              <p style="font-size:11px;color:var(--text-faint);margin:2px 0 0;">
+                {{ lang == 'ar' and 'SSL نشط ومُفعَّل' or 'SSL is active' }}
+              </p>
+            </div>
+            {% else %}
+            <span style="font-size:20px;">⚠️</span>
+            <div>
+              <p style="font-size:13px;font-weight:700;color:#F59E0B;margin:0;">
+                {{ lang == 'ar' and 'لا توجد شهادة SSL' or 'No SSL certificate' }}
+              </p>
+              <p style="font-size:11px;color:var(--text-faint);margin:2px 0 0;">
+                {{ lang == 'ar' and 'أضف النطاق أولاً ثم جدد الشهادة' or 'Add domain first then renew' }}
+              </p>
+            </div>
+            {% endif %}
+          </div>
+
+          <button onclick="renewSSL(this)"
+                  style="padding:10px 20px;border-radius:9px;border:none;cursor:pointer;
+                         background:rgba(0,174,239,0.12);color:#00AEEF;
+                         border:1.5px solid rgba(0,174,239,0.3);
+                         font-size:12px;font-weight:700;white-space:nowrap;flex-shrink:0;">
+            🔄 {{ lang == 'ar' and 'تجديد SSL' or 'Renew SSL' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+    function saveDomain(btn) {
+      var domain = document.getElementById('domain-input').value.trim();
+      if (!domain) { showMsg('domain-msg', '✗ {{ 'أدخل النطاق أولاً' if lang == 'ar' else 'Enter domain first' }}', false); return; }
+      btn.disabled = true; btn.textContent = '...';
+      var fd = new FormData(); fd.append('domain', domain);
+      fetch('/api/admin/domain', {method:'POST', body:fd})
+        .then(function(r){return r.json();})
+        .then(function(d){
+          btn.disabled=false; btn.innerHTML='💾 {{ 'حفظ النطاق' if lang == 'ar' else 'Save Domain' }}';
+          showMsg('domain-msg', d.message || (d.ok ? '✓' : '✗'), d.ok);
+        })
+        .catch(function(){
+          btn.disabled=false; btn.innerHTML='💾 {{ 'حفظ النطاق' if lang == 'ar' else 'Save Domain' }}';
+          showMsg('domain-msg', '✗ {{ 'خطأ في الاتصال' if lang == 'ar' else 'Connection error' }}', false);
+        });
+    }
+    function renewSSL(btn) {
+      btn.disabled=true; btn.textContent='...';
+      fetch('/api/admin/ssl/renew', {method:'POST'})
+        .then(function(r){return r.json();})
+        .then(function(d){
+          btn.disabled=false; btn.innerHTML='🔄 {{ 'تجديد SSL' if lang == 'ar' else 'Renew SSL' }}';
+          showMsg('ssl-msg', d.message || (d.ok ? '✓' : '✗'), d.ok);
+        })
+        .catch(function(){
+          btn.disabled=false; btn.innerHTML='🔄 {{ 'تجديد SSL' if lang == 'ar' else 'Renew SSL' }}';
+          showMsg('ssl-msg', '✗ {{ 'خطأ' if lang == 'ar' else 'Error' }}', false);
+        });
+    }
+    function showMsg(id, text, ok) {
+      var el = document.getElementById(id);
+      el.style.display = 'block';
+      el.textContent = text;
+      el.style.color = ok ? '#10B981' : '#EF4444';
+      el.style.background = ok ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)';
+      el.style.borderColor = ok ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)';
+      setTimeout(function(){ el.style.display='none'; }, 4000);
+    }
+    </script>
+  </div>
+
+  <!-- ══ TAB: SECURITY ════════════════════════════════════════════════════ -->
+  <div x-show="activeTab === 'security'" x-transition>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+
+      <!-- IP Whitelist -->
+      <div class="card p-5">
+        <h3 style="font-size:14px;font-weight:800;color:var(--text-ink);margin:0 0 14px;">
+          🛡️ {{ lang == 'ar' and 'قائمة IP المسموح بها' or 'IP Whitelist' }}
+        </h3>
+
+        <div id="ip-list" style="display:flex;flex-direction:column;gap:6px;max-height:240px;overflow-y:auto;margin-bottom:12px;">
+          {% for ip in ip_whitelist %}
+          <div id="ip-item-{{ ip.id }}"
+               style="display:flex;align-items:center;justify-content:space-between;
+                      padding:9px 12px;border-radius:8px;background:var(--bg-surface);
+                      border:1px solid var(--border-color);">
+            <code style="font-size:12px;color:var(--text-ink);">{{ ip.ip_address }}</code>
+            <button onclick="deleteIP('{{ ip.id }}')"
+                    style="padding:3px 10px;border-radius:6px;border:1px solid rgba(239,68,68,0.3);
+                           background:rgba(239,68,68,0.08);color:#EF4444;font-size:11px;
+                           cursor:pointer;font-weight:700;">
+              ✕ {{ lang == 'ar' and 'حذف' or 'Remove' }}
+            </button>
+          </div>
+          {% else %}
+          <p id="ip-empty" style="text-align:center;color:var(--text-faint);padding:16px;font-size:12px;">
+            {{ lang == 'ar' and 'لا توجد قيود — النظام مفتوح' or 'No restrictions — system open' }}
+          </p>
+          {% endfor %}
+        </div>
+
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="ip-input" placeholder="192.168.1.0/24" dir="ltr"
+                 style="flex:1;padding:9px 12px;border-radius:8px;background:var(--input-bg);
+                        border:1.5px solid var(--border-color);color:var(--text-ink);
+                        font-size:12px;font-family:monospace;outline:none;">
+          <button onclick="addIP(this)"
+                  style="padding:9px 16px;border-radius:8px;border:none;cursor:pointer;
+                         background:#00AEEF;color:#fff;font-size:12px;font-weight:700;">
+            + {{ lang == 'ar' and 'إضافة' or 'Add' }}
+          </button>
+        </div>
+        <div id="ip-msg" style="display:none;margin-top:8px;padding:8px 12px;border-radius:7px;
+             font-size:11px;font-weight:700;border:1px solid;"></div>
+      </div>
+
+      <!-- 2FA Policy -->
+      <div class="card p-5">
+        <h3 style="font-size:14px;font-weight:800;color:var(--text-ink);margin:0 0 14px;">
+          🔐 {{ lang == 'ar' and 'إلزامية المصادقة الثنائية' or '2FA Policy' }}
+        </h3>
+        <div id="twofa-msg" style="display:none;margin-bottom:10px;padding:8px 12px;border-radius:7px;
+             font-size:11px;font-weight:700;border:1px solid;"></div>
+        <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px;">
+          {% for role, label_ar, label_en in [('admin','مدير النظام','Admin'),('manager','مدير','Manager'),('supervisor','مشرف','Supervisor'),('employee','موظف','Employee')] %}
+          <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+            <span style="font-size:13px;font-weight:600;color:var(--text-ink);">
+              {{ label_ar if lang == 'ar' else label_en }}
+            </span>
+            <input type="checkbox" name="twofa_role" value="{{ role }}"
+                   {% if role in security_config.twofa_required_roles %}checked{% endif %}
+                   style="width:16px;height:16px;cursor:pointer;accent-color:#00AEEF;">
+          </label>
+          {% endfor %}
+        </div>
+        <button onclick="save2FA(this)"
+                style="width:100%;padding:10px;border-radius:9px;border:none;cursor:pointer;
+                       background:linear-gradient(135deg,#00AEEF,#0084b4);color:#fff;
+                       font-size:13px;font-weight:700;">
+          💾 {{ lang == 'ar' and 'حفظ السياسة' or 'Save Policy' }}
+        </button>
+      </div>
+    </div>
+
+    <script>
+    function deleteIP(ipId) {
+      if (!confirm('{{ 'حذف هذا العنوان؟' if lang == 'ar' else 'Remove this IP?' }}')) return;
+      fetch('/api/admin/security/ip/' + ipId, {method:'DELETE'})
+        .then(function(r){return r.json();})
+        .then(function(d){
+          if(d.ok) {
+            var el = document.getElementById('ip-item-' + ipId);
+            if(el) el.remove();
+          }
+        });
+    }
+    function addIP(btn) {
+      var input = document.getElementById('ip-input');
+      var ip = input.value.trim();
+      if(!ip) return;
+      btn.disabled=true;
+      var fd = new FormData(); fd.append('ip_address', ip);
+      fetch('/api/admin/security/ip', {method:'POST', body:fd})
+        .then(function(r){return r.json();})
+        .then(function(d){
+          btn.disabled=false;
+          if(d.ok) {
+            input.value='';
+            var list = document.getElementById('ip-list');
+            var empty = document.getElementById('ip-empty');
+            if(empty) empty.remove();
+            var div = document.createElement('div');
+            div.id = 'ip-item-' + d.id;
+            div.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-radius:8px;background:var(--bg-surface);border:1px solid var(--border-color);';
+            div.innerHTML = '<code style="font-size:12px;color:var(--text-ink);">' + d.ip + '</code>'
+              + '<button onclick="deleteIP(\'' + d.id + '\')" style="padding:3px 10px;border-radius:6px;border:1px solid rgba(239,68,68,0.3);background:rgba(239,68,68,0.08);color:#EF4444;font-size:11px;cursor:pointer;font-weight:700;">✕ {{ 'حذف' if lang == 'ar' else 'Remove' }}</button>';
+            list.appendChild(div);
+            showMsg2('ip-msg', '{{ '✓ تمت الإضافة' if lang == 'ar' else '✓ Added' }}', true);
+          } else {
+            showMsg2('ip-msg', d.message || '✗', false);
+          }
+        })
+        .catch(function(){ btn.disabled=false; showMsg2('ip-msg','✗ Error',false); });
+    }
+    function save2FA(btn) {
+      btn.disabled=true;
+      var checked = Array.from(document.querySelectorAll('input[name=twofa_role]:checked')).map(function(c){return c.value;});
+      var fd = new FormData();
+      checked.forEach(function(r){ fd.append('roles', r); });
+      fetch('/api/admin/security/2fa-policy', {method:'POST', body:fd})
+        .then(function(r){return r.json();})
+        .then(function(d){ btn.disabled=false; showMsg2('twofa-msg', d.message||(d.ok?'✓':'✗'), d.ok); })
+        .catch(function(){ btn.disabled=false; showMsg2('twofa-msg','✗ Error',false); });
+    }
+    function showMsg2(id, text, ok) {
+      var el = document.getElementById(id);
+      el.style.display='block'; el.textContent=text;
+      el.style.color=ok?'#10B981':'#EF4444';
+      el.style.background=ok?'rgba(16,185,129,0.08)':'rgba(239,68,68,0.08)';
+      el.style.borderColor=ok?'rgba(16,185,129,0.3)':'rgba(239,68,68,0.3)';
+      setTimeout(function(){el.style.display='none';},3500);
+    }
+    </script>
+  </div>
+
+  <!-- ══ TAB: FEATURE FLAGS ════════════════════════════════════════════════ -->
+  <div x-show="activeTab === 'flags'" x-transition>
+    <div style="background:var(--bg-card);border:1.5px solid var(--border-color);border-radius:14px;overflow:hidden;">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border-color);">
+        <h3 style="font-size:14px;font-weight:800;color:var(--text-ink);margin:0;">
+          {{ lang == 'ar' and 'خصائص النظام' or 'System Feature Flags' }}
+        </h3>
+      </div>
+
+      {% for flag in feature_flags %}
+      {%- set fid = flag.id | string -%}
+      <div id="flag-row-{{ fid }}"
+           style="display:flex;align-items:center;gap:16px;padding:16px 20px;
+                  border-bottom:1px solid var(--border-color);
+                  background:{{ 'rgba(16,185,129,0.04)' if flag.is_enabled else 'transparent' }};">
+
+        <!-- Name -->
+        <div style="flex:1;">
+          <p style="font-size:13px;font-weight:700;color:var(--text-ink);margin:0;">
+            {{ flag.name_ar if lang == 'ar' else (flag.name_en or flag.name_ar or flag.key) }}
+          </p>
+          <code style="font-size:10px;color:var(--text-faint);">{{ flag.key }}</code>
+        </div>
+
+        <!-- Activate / Deactivate button -->
+        {% if flag.is_enabled %}
+        <button id="flag-btn-{{ fid }}"
+                onclick="toggleFlag('{{ fid }}', this)"
+                data-enabled="1"
+                style="padding:8px 20px;border-radius:9px;border:none;cursor:pointer;
+                       font-size:12px;font-weight:800;min-width:110px;
+                       background:#EF4444;color:#fff;
+                       box-shadow:0 2px 8px rgba(239,68,68,0.35);">
+          ⏹ {{ 'إيقاف' if lang == 'ar' else 'Disable' }}
+        </button>
+        {% else %}
+        <button id="flag-btn-{{ fid }}"
+                onclick="toggleFlag('{{ fid }}', this)"
+                data-enabled="0"
+                style="padding:8px 20px;border-radius:9px;border:none;cursor:pointer;
+                       font-size:12px;font-weight:800;min-width:110px;
+                       background:#10B981;color:#fff;
+                       box-shadow:0 2px 8px rgba(16,185,129,0.35);">
+          ▶ {{ 'تفعيل' if lang == 'ar' else 'Enable' }}
+        </button>
+        {% endif %}
+
+        <!-- Feedback -->
+        <span id="flag-msg-{{ fid }}" style="font-size:11px;font-weight:700;width:70px;"></span>
+      </div>
+      {% else %}
+      <p style="padding:30px;text-align:center;color:var(--text-faint);">لا توجد خصائص</p>
+      {% endfor %}
+    </div>
+
+    <script>
+    function toggleFlag(flagId, btn) {
+      btn.disabled = true;
+      btn.style.opacity = '0.5';
+      var msg = document.getElementById('flag-msg-' + flagId);
+      var row = document.getElementById('flag-row-' + flagId);
+      var isOn = btn.getAttribute('data-enabled') === '1';
+
+      fetch('/api/admin/flags/' + flagId + '/toggle', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          btn.disabled = false;
+          btn.style.opacity = '1';
+          if (d.ok) {
+            if (d.is_enabled) {
+              btn.textContent = '{{ '⏹ إيقاف' if lang == 'ar' else '⏹ Disable' }}';
+              btn.style.background = '#EF4444';
+              btn.style.boxShadow = '0 2px 8px rgba(239,68,68,0.35)';
+              btn.setAttribute('data-enabled', '1');
+              row.style.background = 'rgba(16,185,129,0.04)';
+              msg.style.color = '#10B981';
+              msg.textContent = '{{ '✓ مفعّل' if lang == 'ar' else '✓ Enabled' }}';
+            } else {
+              btn.textContent = '{{ '▶ تفعيل' if lang == 'ar' else '▶ Enable' }}';
+              btn.style.background = '#10B981';
+              btn.style.boxShadow = '0 2px 8px rgba(16,185,129,0.35)';
+              btn.setAttribute('data-enabled', '0');
+              row.style.background = 'transparent';
+              msg.style.color = '#6b7280';
+              msg.textContent = '{{ '○ موقوف' if lang == 'ar' else '○ Off' }}';
+            }
+          } else {
+            msg.style.color = '#EF4444';
+            msg.textContent = '✗ Error';
+          }
+          setTimeout(function() { msg.textContent = ''; }, 2500);
+        })
+        .catch(function() {
+          btn.disabled = false;
+          btn.style.opacity = '1';
+          msg.style.color = '#EF4444';
+          msg.textContent = '✗ {{ 'فشل' if lang == 'ar' else 'Failed' }}';
+          setTimeout(function() { msg.textContent = ''; }, 2500);
+        });
+    }
+    </script>
+  </div>
+
+  <!-- ══ TAB: BACKUP ══════════════════════════════════════════════════════ -->
+  <div x-show="activeTab === 'backup'" x-transition>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div class="card p-5">
+        <h3 class="text-sm font-semibold mb-4" style="color: var(--text-ink);">{{ t('adm.backup_now', lang=lang) }}</h3>
+        <p class="text-xs mb-4" style="color: var(--text-muted);">{{ lang == 'ar' and 'إنشاء نسخة احتياطية من قاعدة البيانات وتخزينها.' or 'Create a database snapshot and store it securely.' }}</p>
+        <button hx-post="/api/admin/backup" hx-target="#backup-result" class="btn-primary w-full justify-center">
+          💾 {{ t('adm.backup_now', lang=lang) }}
+        </button>
+        <div id="backup-result" class="mt-3 text-xs"></div>
+      </div>
+      <div class="card p-5">
+        <h3 class="text-sm font-semibold mb-4" style="color: var(--text-ink);">{{ t('adm.restore', lang=lang) }}</h3>
+        <p class="text-xs mb-4 text-red-600">⚠️ {{ lang == 'ar' and 'سيؤدي الاستعادة إلى استبدال جميع البيانات الحالية.' or 'Restore will replace all current data.' }}</p>
+        <label class="btn-secondary w-full justify-center cursor-pointer">
+          📤 {{ lang == 'ar' and 'رفع نسخة احتياطية' or 'Upload Backup File' }}
+          <input type="file" accept=".sql,.gz,.dump" class="sr-only"
+                 hx-post="/api/admin/restore" hx-encoding="multipart/form-data" hx-target="#restore-result">
+        </label>
+        <div id="restore-result" class="mt-3 text-xs"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ TAB: SYSTEM HEALTH ════════════════════════════════════════════════ -->
+  <div x-show="activeTab === 'health'" x-transition x-data="{ lastRefresh: '' }" x-init="lastRefresh = new Date().toLocaleTimeString('ar-SA')">
+    <!-- Header bar -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <div>
+        <h3 style="font-size:14px;font-weight:800;color:var(--text-ink);margin:0;">
+          {{ lang == 'ar' and 'صحة النظام — بيانات حقيقية' or 'System Health — Live Data' }}
+        </h3>
+        <p style="font-size:11px;color:var(--text-muted);margin-top:3px;">
+          🔄 {{ lang == 'ar' and 'يتحدث تلقائياً كل 30 ثانية' or 'Auto-refreshes every 30s' }}
+          &nbsp;·&nbsp;
+          {{ lang == 'ar' and 'آخر تحديث:' or 'Last refresh:' }}
+          <span x-text="lastRefresh" style="font-family:monospace;color:var(--text-ink);"></span>
+        </p>
+      </div>
+      <button hx-get="/api/admin/health" hx-target="#health-grid" hx-swap="innerHTML"
+              @click="lastRefresh = new Date().toLocaleTimeString('ar-SA')"
+              style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:9px;
+                     border:1.5px solid var(--border-color);background:var(--bg-surface);
+                     color:var(--text-muted);font-size:12px;font-weight:700;cursor:pointer;">
+        ↻ {{ lang == 'ar' and 'تحديث الآن' or 'Refresh' }}
+      </button>
+    </div>
+
+    <!-- Health grid -->
+    <div id="health-grid"
+         hx-get="/api/admin/health"
+         hx-trigger="load, every 30s"
+         hx-target="this"
+         hx-swap="innerHTML"
+         @htmx:after-swap="lastRefresh = new Date().toLocaleTimeString('ar-SA')">
+      <!-- Loading skeleton -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;">
+        {% for _ in range(6) %}
+        <div style="background:var(--bg-card);border:1.5px solid var(--border-color);
+                    border-radius:14px;padding:18px;animation:pulse 1.5s infinite;">
+          <div style="height:38px;background:var(--bg-surface);border-radius:8px;margin-bottom:14px;"></div>
+          {% for __ in range(4) %}
+          <div style="height:12px;background:var(--bg-surface);border-radius:4px;margin-bottom:8px;width:{{ loop.index0 % 2 == 0 and '80%' or '60%' }};"></div>
+          {% endfor %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ TAB: DB MAINTENANCE ══════════════════════════════════════════════ -->
+  <div x-show="activeTab === 'db'" x-transition>
+    <div class="card p-6 space-y-4">
+      <h3 class="text-sm font-semibold" style="color: var(--text-ink);">{{ t('adm.tab_db', lang=lang) }}</h3>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div class="rounded-xl border p-4" style="border-color: var(--border-color);">
+          <h4 class="text-sm font-medium mb-2" style="color: var(--text-ink);">{{ t('adm.db_vacuum', lang=lang) }}</h4>
+          <p class="text-xs mb-3" style="color: var(--text-muted);">{{ lang == 'ar' and 'يُحرر المساحة المهدرة ويُحسّن الأداء.' or 'Reclaims storage and improves performance.' }}</p>
+          <button hx-post="/api/admin/db/vacuum" hx-target="#db-result" class="btn-secondary text-xs py-1.5">
+            ▶ {{ t('adm.db_vacuum', lang=lang) }}
+          </button>
+        </div>
+        <div class="rounded-xl border p-4" style="border-color: var(--border-color);">
+          <h4 class="text-sm font-medium mb-2" style="color: var(--text-ink);">{{ t('adm.db_analyze', lang=lang) }}</h4>
+          <p class="text-xs mb-3" style="color: var(--text-muted);">{{ lang == 'ar' and 'يُحدّث إحصاءات الاستعلام للمُحسِّن.' or 'Updates query planner statistics.' }}</p>
+          <button hx-post="/api/admin/db/analyze" hx-target="#db-result" class="btn-secondary text-xs py-1.5">
+            ▶ {{ t('adm.db_analyze', lang=lang) }}
+          </button>
+        </div>
+      </div>
+      <div id="db-result" class="text-xs font-mono" style="color: var(--text-muted);"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ── Seasonal theme scheduler ── */
+function themeScheduler() {
+  return {
+    themes: window._adminThemes || [],
+    showModal: false,
+    editId: null,
+    msg: '', msgOk: true, saving: false,
+    form: {
+      name_ar:'', name_en:'', icon_emoji:'',
+      primary_color:'#00AEEF', secondary_color:'#F59E0B', background_color:'#0B1221',
+      welcome_message_ar:'', welcome_message_en:'',
+      starts_at:'', ends_at:''
+    },
+    openNew() {
+      this.editId = null;
+      this.form = {
+        name_ar:'', name_en:'', icon_emoji:'', primary_color:'#00AEEF',
+        secondary_color:'#F59E0B', background_color:'#0B1221',
+        welcome_message_ar:'', welcome_message_en:'', starts_at:'', ends_at:''
+      };
+      this.msg = ''; this.showModal = true;
+    },
+    openEdit(th) {
+      this.editId = th.id;
+      this.form = {
+        name_ar: th.name_ar,
+        name_en: th.name_en,
+        icon_emoji: th.icon_emoji || '',
+        primary_color: th.primary_color,
+        secondary_color: th.secondary_color,
+        background_color: th.background_color || '#0B1221',
+        welcome_message_ar: th.welcome_message_ar || '',
+        welcome_message_en: th.welcome_message_en || '',
+        starts_at: (th.starts_at || '').substring(0, 16).replace(' ', 'T'),
+        ends_at:   (th.ends_at   || '').substring(0, 16).replace(' ', 'T')
+      };
+      this.msg = ''; this.showModal = true;
+    },
+    async save() {
+      this.saving = true; this.msg = '';
+      const fd = new FormData();
+      Object.entries(this.form).forEach(([k, v]) => {
+        if (v !== null && v !== undefined && v !== false) fd.append(k, String(v));
+      });
+      const url    = this.editId ? '/api/admin/themes/' + this.editId : '/api/admin/themes';
+      const method = this.editId ? 'PUT' : 'POST';
+      const r = await fetch(url, { method, body: fd });
+      const d = await r.json();
+      this.saving = false; this.msgOk = d.ok;
+      this.msg = d.message || d.error || '';
+      if (d.ok) { setTimeout(() => location.reload(), 900); }
+    },
+    async toggle(th) {
+      // Deactivate all others first if activating
+      const r = await fetch('/api/admin/themes/' + th.id + '/toggle', { method: 'POST' });
+      const d = await r.json();
+      if (d.ok) {
+        // If activating, deactivate all others in local state
+        if (d.is_active) {
+          this.themes.forEach(t => { t.is_active = (t.id === th.id); });
+        } else {
+          th.is_active = false;
+        }
+      }
+    },
+    async del(id) {
+      if (!confirm('حذف هذا المظهر الموسمي؟')) return;
+      await fetch('/api/admin/themes/' + id, { method: 'DELETE' });
+      this.themes = this.themes.filter(t => t.id !== id);
+    }
+  };
+}
+</script>
+{% endblock %}

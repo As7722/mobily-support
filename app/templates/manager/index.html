@@ -1,0 +1,368 @@
+{% extends "base_app.html" %}
+{% block title %}{{ t('mgr.title', lang=lang) }} — موبايلي{% endblock %}
+{% block page_title %}{{ t('mgr.title', lang=lang) }}{% endblock %}
+
+{% block extra_head %}
+{{ super() }}
+<script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.2/dist/apexcharts.min.js" defer></script>
+{% endblock %}
+
+{% block content %}
+<div class="p-6 space-y-6 fade-in" x-data="{ period: '{{ period }}' }">
+
+  <!-- ── Period Selector ────────────────────────────────────────────────── -->
+  <div class="flex items-center justify-between">
+    <div class="seg-control">
+      {% for p, label in [('today', t('period.today', lang=lang)), ('month', t('period.month', lang=lang))] %}
+      <a href="/manager?period={{ p }}"
+         class="seg-btn {% if period == p %}active{% endif %}">
+        {{ label }}
+      </a>
+      {% endfor %}
+    </div>
+    <a href="/manager/analytics" class="btn-ghost btn-sm">
+      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5M9 11.25v1.5M12 9v3.75m3-6.75v6.75"/>
+      </svg>
+      {{ t('manager.analytics', lang=lang) }}
+    </a>
+  </div>
+
+  <!-- ── Executive KPI Cards ────────────────────────────────────────────── -->
+  <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+
+    {# Total Tickets #}
+    <div class="kpi-card kpi-card-blue">
+      <div class="kpi-icon kpi-icon-blue">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859m-19.5.338V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H6.911a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661z"/>
+        </svg>
+      </div>
+      <div class="mt-4">
+        <p class="text-3xl font-bold" style="color: var(--text-ink);">{{ kpis.total_tickets }}</p>
+        <p class="mt-0.5 text-xs font-medium" style="color: var(--text-muted);">{{ t('stats.total_tickets', lang=lang) }}</p>
+      </div>
+    </div>
+
+    {# Resolved #}
+    <div class="kpi-card kpi-card-green">
+      <div class="kpi-icon kpi-icon-green">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+      </div>
+      <div class="mt-4">
+        <p class="text-3xl font-bold" style="color: var(--text-ink);">{{ kpis.resolved_tickets }}</p>
+        <p class="mt-0.5 text-xs font-medium" style="color: var(--text-muted);">{{ t('stats.resolved', lang=lang) }}</p>
+      </div>
+    </div>
+
+    {# Open #}
+    <div class="kpi-card kpi-card-amber">
+      <div class="kpi-icon kpi-icon-amber">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776"/>
+        </svg>
+      </div>
+      <div class="mt-4">
+        <p class="text-3xl font-bold" style="color: var(--text-ink);">{{ kpis.open_tickets }}</p>
+        <p class="mt-0.5 text-xs font-medium" style="color: var(--text-muted);">{{ t('stats.open_tickets', lang=lang) }}</p>
+      </div>
+    </div>
+
+    {# SLA Breached #}
+    <div class="kpi-card {% if kpis.sla_breached > 0 %}kpi-card-red{% else %}kpi-card-green{% endif %}">
+      <div class="kpi-icon {% if kpis.sla_breached > 0 %}kpi-icon-red{% else %}kpi-icon-green{% endif %}">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+        </svg>
+      </div>
+      <div class="mt-4">
+        <p class="text-3xl font-bold {% if kpis.sla_breached > 0 %}text-red-600 dark:text-red-400{% endif %}" {% if kpis.sla_breached == 0 %}style="color: var(--text-ink);"{% endif %}>{{ kpis.sla_breached }}</p>
+        <p class="mt-0.5 text-xs font-medium" style="color: var(--text-muted);">{{ t('stats.sla_breached', lang=lang) }}</p>
+      </div>
+    </div>
+
+    {# SLA Compliance #}
+    <div class="kpi-card kpi-card-violet">
+      <div class="kpi-icon kpi-icon-violet">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/>
+        </svg>
+      </div>
+      <div class="mt-4">
+        <p class="text-3xl font-bold {% if kpis.sla_compliance_pct >= 90 %}text-emerald-600 dark:text-emerald-400{% elif kpis.sla_compliance_pct >= 75 %}text-amber-600 dark:text-amber-400{% else %}text-red-600 dark:text-red-400{% endif %}">
+          {{ kpis.sla_compliance_pct }}%
+        </p>
+        <p class="mt-0.5 text-xs font-medium" style="color: var(--text-muted);">{{ t('stats.sla_compliance', lang=lang) }}</p>
+      </div>
+    </div>
+
+    {# CSAT #}
+    <div class="kpi-card kpi-card-amber">
+      <div class="kpi-icon kpi-icon-amber">
+        <svg fill="currentColor" viewBox="0 0 24 24">
+          <path d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z"/>
+        </svg>
+      </div>
+      <div class="mt-4">
+        <p class="text-3xl font-bold" style="color: var(--text-ink);">
+          {{ '%.1f'|format(kpis.avg_csat) if kpis.avg_csat else '—' }}
+        </p>
+        <p class="mt-0.5 text-xs font-medium" style="color: var(--text-muted);">{{ t('stats.csat', lang=lang) }}</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Charts Row ──────────────────────────────────────────────────────── -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+    <!-- Channel Breakdown -->
+    <div class="card p-5">
+      <div class="flex items-center gap-2 mb-4">
+        <div class="flex h-7 w-7 items-center justify-center rounded-lg" style="background: var(--bg-muted);">
+          <svg class="h-4 w-4" style="color: var(--text-muted);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M10.5 6a7.5 7.5 0 107.5 7.5h-7.5V6z M13.5 10.5H21A7.5 7.5 0 0013.5 3v7.5z"/>
+          </svg>
+        </div>
+        <h3 class="text-sm font-semibold" style="color: var(--text-ink);">{{ t('mgr.channel_breakdown', lang=lang) }}</h3>
+      </div>
+      <div id="channel-chart" class="min-h-[200px]"></div>
+    </div>
+
+    <!-- Ticket Trend -->
+    <div class="card p-5">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-2">
+          <div class="flex h-7 w-7 items-center justify-center rounded-lg" style="background: var(--bg-muted);">
+            <svg class="h-4 w-4" style="color: var(--text-muted);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941"/>
+            </svg>
+          </div>
+          <h3 class="text-sm font-semibold" style="color: var(--text-ink);">{{ t('mgr.peak_hours', lang=lang) }}</h3>
+        </div>
+        <span class="text-[11px]" style="color: var(--text-faint);">آخر 7 أيام</span>
+      </div>
+      <div id="heatmap-chart" class="min-h-[200px]"></div>
+    </div>
+  </div>
+
+  <!-- ── Priority Distribution ───────────────────────────────────────────── -->
+  <div class="card p-5">
+    <div class="flex items-center gap-2 mb-4">
+      <div class="flex h-7 w-7 items-center justify-center rounded-lg" style="background: var(--bg-muted);">
+        <svg class="h-4 w-4" style="color: var(--text-muted);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>
+        </svg>
+      </div>
+      <h3 class="text-sm font-semibold" style="color: var(--text-ink);">{{ t('mgr.branch_heatmap', lang=lang) }}</h3>
+    </div>
+    <div id="branch-heatmap" class="min-h-[160px]"></div>
+  </div>
+
+  <!-- ── System Health + SLA Violations ─────────────────────────────────── -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+    <!-- System Health (workload) -->
+    <div class="card p-5">
+      <div class="flex items-center gap-2 mb-4">
+        <div class="flex h-7 w-7 items-center justify-center rounded-lg" style="background: var(--bg-muted);">
+          <svg class="h-4 w-4" style="color: var(--text-muted);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M21 10.5h.375c.621 0 1.125.504 1.125 1.125v2.25c0 .621-.504 1.125-1.125 1.125H21M4.5 10.5H18V15H4.5v-4.5zM3.75 18h15A2.25 2.25 0 0021 15.75v-6a2.25 2.25 0 00-2.25-2.25h-15A2.25 2.25 0 001.5 9.75v6A2.25 2.25 0 003.75 18z"/>
+          </svg>
+        </div>
+        <h3 class="text-sm font-semibold" style="color: var(--text-ink);">{{ t('mgr.system_health', lang=lang) }}</h3>
+      </div>
+      <div hx-get="/api/supervisor/workload" hx-trigger="load" hx-target="this" hx-swap="innerHTML">
+        <div class="space-y-3 animate-pulse">
+          {% for _ in range(3) %}
+          <div class="flex items-center gap-3">
+            <div class="h-8 w-8 rounded-xl" style="background: var(--bg-muted);"></div>
+            <div class="flex-1 space-y-1.5">
+              <div class="h-3 w-24 rounded" style="background: var(--bg-muted);"></div>
+              <div class="h-1.5 rounded-full" style="background: var(--bg-muted);"></div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <!-- SLA Violations -->
+    <div class="card overflow-hidden">
+      <div class="flex items-center gap-2 px-5 py-4 border-b" style="border-color: var(--border-color);">
+        <div class="flex h-7 w-7 items-center justify-center rounded-lg bg-red-100 dark:bg-red-900/30">
+          <svg class="h-4 w-4 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+          </svg>
+        </div>
+        <h3 class="text-sm font-semibold" style="color: var(--text-ink);">{{ t('sup.sla_violations', lang=lang) }}</h3>
+        {% if violations %}
+        <span class="ms-auto badge-critical">{{ violations|length }}</span>
+        {% endif %}
+      </div>
+      <div class="divide-y divide-[var(--border-color)] max-h-64 overflow-y-auto">
+        {% for ticket in violations %}
+        <a href="/tickets/{{ ticket.id }}"
+           class="group flex items-center gap-3 px-5 py-3 hover:bg-red-50/60 dark:hover:bg-red-950/20 transition-colors duration-150">
+          <span class="relative flex h-2 w-2 shrink-0">
+            <span class="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75 animate-ping"></span>
+            <span class="relative inline-flex h-2 w-2 rounded-full bg-red-500"></span>
+          </span>
+          <div class="min-w-0 flex-1">
+            <p class="font-mono text-xs font-bold group-hover:text-red-700 dark:group-hover:text-red-300 transition-colors" style="color: var(--text-ink);">{{ ticket.ticket_number }}</p>
+            <p class="text-[10px] truncate mt-0.5" style="color: var(--text-muted);">{{ ticket.subject or '' }}</p>
+          </div>
+          <span class="badge-{{ ticket.priority }} shrink-0">{{ t('ticket.priority.' ~ ticket.priority, lang=lang) }}</span>
+        </a>
+        {% else %}
+        <div class="flex flex-col items-center gap-3 px-5 py-10">
+          <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100 dark:bg-emerald-900/30">
+            <svg class="h-6 w-6 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+          </div>
+          <p class="text-sm font-medium text-emerald-700 dark:text-emerald-400">{{ t('sup.no_violations', lang=lang) }}</p>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Cold Storage Archive Search ────────────────────────────────────── -->
+  <div class="card p-5" x-data="{ showCold: false }">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <svg class="h-5 w-5" style="color:#6366f1;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/>
+        </svg>
+        <h3 class="text-sm font-semibold" style="color:var(--text-ink);">{{ t('mgr.cold_storage', lang=lang) }}</h3>
+      </div>
+      <button @click="showCold = !showCold" class="btn-ghost btn-sm">
+        <span x-text="showCold ? '{{ t('app.close', lang=lang) }}' : '{{ t('app.search', lang=lang) }}'"></span>
+      </button>
+    </div>
+    <p class="text-xs mt-1" style="color:var(--text-faint);">{{ t('mgr.cold_storage_desc', lang=lang) }}</p>
+    <div x-show="showCold" x-transition class="mt-4">
+      <div class="flex gap-2">
+        <input type="text" id="cold-q" class="form-input flex-1" placeholder="{{ lang == 'ar' and 'رقم التذكرة أو الموضوع...' or 'Ticket # or subject...' }}">
+        <button hx-get="/api/manager/cold-storage"
+                hx-include="#cold-q"
+                hx-target="#cold-results"
+                hx-vals='js:{"q": document.getElementById("cold-q").value}'
+                class="px-4 py-2 rounded font-bold text-white" style="background:#00AEEF;">
+          {{ t('app.search', lang=lang) }}
+        </button>
+      </div>
+      <div id="cold-results" class="mt-3"></div>
+    </div>
+  </div>
+
+  <!-- ── Iron Rule #4: Manager Escalation Queue (Level 4) ──────────────── -->
+  <div class="card overflow-hidden">
+    <div class="flex items-center justify-between px-5 py-4 border-b" style="border-color: var(--border-color);">
+      <h2 class="font-semibold text-sm flex items-center gap-2" style="color: var(--text-ink);">
+        <span style="width:8px;height:8px;border-radius:50%;background:#EF4444;flex-shrink:0;"></span>
+        {{ t('queue.manager', lang=lang) if t('queue.manager', lang=lang) != 'queue.manager' else 'طابور المدراء' }}
+      </h2>
+      <a href="/manager/tickets?queue_filter=manager" class="btn-ghost btn-sm">{{ t('app.view', lang=lang) }}</a>
+    </div>
+    <table class="data-table">
+      <thead><tr><th>{{ t('ticket.number', lang=lang) }}</th><th>{{ t('ticket.priority.label', lang=lang) }}</th><th>{{ t('ticket.assigned_to', lang=lang) }}</th><th>SLA</th><th class="w-20"></th></tr></thead>
+      <tbody id="mgr-queue-manager" hx-get="/api/tickets/queues/manager" hx-trigger="load" hx-swap="innerHTML">
+        <tr><td colspan="5" class="text-center py-4 text-xs" style="color:var(--text-faint);">{{ t('app.loading', lang=lang) }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% block extra_scripts %}
+<script>
+(function () {
+  const isDark = document.documentElement.classList.contains('dark');
+  const textColor  = isDark ? '#94a3b8' : '#64748b';
+  const gridColor  = isDark ? '#1e293b' : '#f1f5f9';
+
+  /* Channel Donut Chart */
+  const channelData = {{ kpis.channel_breakdown | tojson }};
+  const channelEl = document.getElementById('channel-chart');
+  if (Object.keys(channelData).length > 0 && channelEl) {
+    new ApexCharts(channelEl, {
+      chart: { type: 'donut', height: 220, background: 'transparent', fontFamily: 'inherit' },
+      theme: { mode: isDark ? 'dark' : 'light' },
+      labels: Object.keys(channelData),
+      series: Object.values(channelData),
+      colors: ['#005EB8', '#059669', '#D97706', '#7C3AED'],
+      legend: { position: 'bottom', fontSize: '12px', labels: { colors: textColor } },
+      dataLabels: { style: { fontSize: '11px', fontFamily: 'inherit' } },
+      plotOptions: { pie: { donut: { size: '65%', labels: { show: true, total: { show: true, label: '{{ t("stats.total_tickets", lang=lang) }}', color: textColor } } } } },
+      stroke: { show: false },
+    }).render();
+  } else if (channelEl) {
+    channelEl.innerHTML = '<p class="flex items-center justify-center h-full text-sm py-10" style="color: var(--text-faint);"">{{ t("errors.not_found", lang=lang) }}</p>';
+  }
+
+  /* Trend / Heatmap Chart */
+  fetch('/api/manager/kpis?period={{ period }}')
+    .then(r => r.json())
+    .then(data => {
+      const trend = data.trend || [];
+
+      /* Trend Area Chart */
+      const heatEl = document.getElementById('heatmap-chart');
+      if (heatEl && trend.length) {
+        new ApexCharts(heatEl, {
+          chart: { type: 'area', height: 210, background: 'transparent', toolbar: { show: false }, fontFamily: 'inherit' },
+          theme: { mode: isDark ? 'dark' : 'light' },
+          series: [
+            { name: '{{ t("kpi.resolved", lang=lang) }}', data: trend.map(d => d.resolved) },
+            { name: '{{ t("kpi.total_tickets", lang=lang) }}', data: trend.map(d => d.created) },
+          ],
+          xaxis: { categories: trend.map(d => d.date.slice(5)), labels: { style: { colors: textColor, fontSize: '11px' } } },
+          yaxis: { labels: { style: { colors: textColor, fontSize: '11px' } } },
+          colors: ['#059669', '#005EB8'],
+          fill: { type: 'gradient', gradient: { opacityFrom: 0.35, opacityTo: 0.05 } },
+          stroke: { width: 2.5, curve: 'smooth' },
+          dataLabels: { enabled: false },
+          legend: { position: 'top', fontSize: '12px', labels: { colors: textColor } },
+          grid: { borderColor: gridColor, strokeDashArray: 4 },
+          tooltip: { theme: isDark ? 'dark' : 'light' },
+        }).render();
+      }
+
+      /* Priority Bar Chart */
+      const prio = data.priority_breakdown || {};
+      const branchEl = document.getElementById('branch-heatmap');
+      if (branchEl && Object.keys(prio).length) {
+        const prioColors = { critical: '#DC2626', high: '#EA580C', medium: '#D97706', low: '#059669' };
+        new ApexCharts(branchEl, {
+          chart: { type: 'bar', height: 180, background: 'transparent', toolbar: { show: false }, fontFamily: 'inherit' },
+          theme: { mode: isDark ? 'dark' : 'light' },
+          series: [{ name: '{{ t("stats.total_tickets", lang=lang) }}', data: Object.values(prio) }],
+          xaxis: { categories: Object.keys(prio), labels: { style: { colors: textColor, fontSize: '12px' } } },
+          yaxis: { labels: { style: { colors: textColor, fontSize: '11px' } } },
+          colors: Object.keys(prio).map(k => prioColors[k] || '#005EB8'),
+          plotOptions: { bar: { borderRadius: 6, distributed: true, columnWidth: '45%' } },
+          dataLabels: { enabled: true, style: { fontSize: '11px', fontFamily: 'inherit' } },
+          legend: { show: false },
+          grid: { borderColor: gridColor, strokeDashArray: 4 },
+          tooltip: { theme: isDark ? 'dark' : 'light' },
+        }).render();
+      }
+    })
+    .catch(() => {});
+})();
+</script>
+{% endblock %}
+{% endblock %}

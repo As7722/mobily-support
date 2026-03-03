@@ -1,0 +1,178 @@
+{% extends "base_app.html" %}
+
+{% block title %}{{ t('manager.all_tickets', lang=lang) }} — موبايلي{% endblock %}
+{% block page_title %}{{ t('manager.all_tickets', lang=lang) }}{% endblock %}
+
+{% block content %}
+<div class="space-y-4 p-4" x-data="{ selected: [] }">
+
+  {# ── Filters ─────────────────────────────────────────────────────────────── #}
+  <form method="get" action="/manager/tickets" class="card p-4 flex flex-wrap gap-3 items-end">
+    <div class="flex-1 min-w-[200px]">
+      <label class="form-label">{{ t('ticket.search', lang=lang) }}</label>
+      <input type="search" name="q" value="{{ q or '' }}" placeholder="{{ t('ticket.omni_search', lang=lang) }}"
+             class="form-input">
+    </div>
+    <div>
+      <label class="form-label">{{ t('ticket.status.label', lang=lang) }}</label>
+      <select name="status" class="form-input">
+        <option value="">{{ t('app.all', lang=lang) }}</option>
+        {% for s in ['new','open','pending_customer','pending_3rd','resolved','closed','archived'] %}
+        <option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ t('ticket.status.' ~ s, lang=lang) }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="form-label">{{ t('ticket.priority.label', lang=lang) }}</label>
+      <select name="priority" class="form-input">
+        <option value="">{{ t('app.all', lang=lang) }}</option>
+        {% for p in ['critical','high','medium','low'] %}
+        <option value="{{ p }}" {% if priority == p %}selected{% endif %}>{{ t('ticket.priority.' ~ p, lang=lang) }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="form-label">{{ t('portal.category', lang=lang) }}</label>
+      <select name="category_id" class="form-input">
+        <option value="">{{ t('app.all', lang=lang) }}</option>
+        {% for cat in categories %}
+        <option value="{{ cat.id }}" {% if category_id == cat.id|string %}selected{% endif %}>
+          {{ cat.name_ar if lang == 'ar' else (cat.name_en or cat.name_ar) }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="form-label">{{ t('report.period', lang=lang) }}</label>
+      <select name="date_range" class="form-input">
+        <option value="7" {% if date_range == '7' %}selected{% endif %}>{{ t('period.last_7', lang=lang) }}</option>
+        <option value="30" {% if date_range == '30' %}selected{% endif %}>{{ t('period.last_30', lang=lang) }}</option>
+        <option value="90" {% if date_range == '90' %}selected{% endif %}>{{ t('period.last_90', lang=lang) }}</option>
+        <option value="365" {% if date_range == '365' %}selected{% endif %}>{{ t('period.last_year', lang=lang) }}</option>
+        <option value="" {% if not date_range %}selected{% endif %}>{{ t('app.all', lang=lang) }}</option>
+      </select>
+    </div>
+    <div class="flex items-end gap-2">
+      <label class="flex items-center gap-2 text-sm cursor-pointer">
+        <input type="checkbox" name="include_archived" {% if include_archived %}checked{% endif %}
+               class="h-4 w-4 rounded text-primary">
+        <span style="color: var(--text-muted);">{{ t('ticket.include_archived', lang=lang) }}</span>
+      </label>
+    </div>
+    <button type="submit" class="btn-primary">{{ t('app.filter', lang=lang) }}</button>
+    <a href="/manager/tickets" class="btn-secondary">{{ t('app.reset', lang=lang) }}</a>
+    <a href="/api/manager/tickets/export?{{ request.query_string.decode() }}" class="btn-secondary">📤 {{ t('app.export_excel', lang=lang) }}</a>
+  </form>
+
+  {# ── Summary Bar ──────────────────────────────────────────────────────────── #}
+  <div class="grid grid-cols-4 gap-3">
+    {% for label, val, color in [
+      ('ticket.status.open', summary.open, 'blue'),
+      ('ticket.status.resolved', summary.resolved, 'green'),
+      ('ticket.sla_breached', summary.breached, 'red'),
+      ('app.total', summary.total, 'gray'),
+    ] %}
+    <div class="card p-3 text-center">
+      <p class="text-xl font-bold text-{{ color }}-600 dark:text-{{ color }}-400">{{ val }}</p>
+      <p class="text-xs mt-0.5" style="color: var(--text-muted);">{{ t(label, lang=lang) }}</p>
+    </div>
+    {% endfor %}
+  </div>
+
+  {# ── Tickets Table ────────────────────────────────────────────────────────── #}
+  <div class="card overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 dark:bg-gray-800/50" style="border-bottom: 1px solid var(--border-color);">
+          <tr>
+            <th class="px-3 py-3 text-start font-semibold" style="color: var(--text-muted);">#</th>
+            <th class="px-3 py-3 text-start font-semibold" style="color: var(--text-muted);">{{ t('portal.subject', lang=lang) }}</th>
+            <th class="px-3 py-3 text-start font-semibold" style="color: var(--text-muted);">{{ t('ticket.status.label', lang=lang) }}</th>
+            <th class="px-3 py-3 text-start font-semibold" style="color: var(--text-muted);">{{ t('ticket.priority.label', lang=lang) }}</th>
+            <th class="px-3 py-3 text-start font-semibold" style="color: var(--text-muted);">{{ t('ticket.assigned_to', lang=lang) }}</th>
+            <th class="px-3 py-3 text-start font-semibold" style="color: var(--text-muted);">{{ t('portal.category', lang=lang) }}</th>
+            <th class="px-3 py-3 text-start font-semibold" style="color: var(--text-muted);">{{ t('ticket.channel', lang=lang) }}</th>
+            <th class="px-3 py-3 text-start font-semibold" style="color: var(--text-muted);">SLA</th>
+            <th class="px-3 py-3 text-start font-semibold" style="color: var(--text-muted);">{{ t('ticket.created_at', lang=lang) }}</th>
+            <th class="px-3 py-3"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-[var(--border-color)]">
+          {% for ticket in tickets %}
+          <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/40 transition {% if ticket.sla_breached %}bg-red-50/30 dark:bg-red-900/10{% endif %}">
+            <td class="px-3 py-3">
+              <a href="/tickets/{{ ticket.id }}" class="font-mono text-primary hover:underline text-xs">
+                {{ ticket.ticket_number }}
+              </a>
+            </td>
+            <td class="px-3 py-3 max-w-[200px]">
+              <p class="text-xs font-medium truncate" style="color: var(--text-ink);">{{ ticket.subject or '—' }}</p>
+              {% if ticket.submitter_name %}
+              <p class="text-[10px] mt-0.5" style="color: var(--text-faint);">{{ ticket.submitter_name }}</p>
+              {% endif %}
+            </td>
+            <td class="px-3 py-3">
+              <span class="badge-{{ ticket.status }} rounded-full px-2 py-0.5 text-[10px] font-semibold">
+                {{ t('ticket.status.' ~ ticket.status, lang=lang) }}
+              </span>
+            </td>
+            <td class="px-3 py-3">
+              <span class="badge-{{ ticket.priority }} rounded-full px-2 py-0.5 text-[10px] font-semibold">
+                {{ t('ticket.priority.' ~ ticket.priority, lang=lang) }}
+              </span>
+            </td>
+            <td class="px-3 py-3 text-xs" style="color: var(--text-ink);">
+              {% if ticket.assignee %}
+                {{ ticket.assignee.full_name_ar if lang == 'ar' else (ticket.assignee.full_name_en or ticket.assignee.full_name_ar) }}
+              {% else %}<span style="color: var(--text-faint);">—</span>{% endif %}
+            </td>
+            <td class="px-3 py-3 text-xs" style="color: var(--text-muted);">
+              {% if ticket.category %}{{ ticket.category.name_ar if lang == 'ar' else (ticket.category.name_en or ticket.category.name_ar) }}
+              {% else %}—{% endif %}
+            </td>
+            <td class="px-3 py-3 text-xs" style="color: var(--text-muted);">{{ ticket.channel or '—' }}</td>
+            <td class="px-3 py-3">
+              {% if ticket.sla_breached %}
+              <span class="text-[10px] font-semibold text-red-600 dark:text-red-400">⚠️ {{ t('ticket.sla_breached', lang=lang) }}</span>
+              {% elif ticket.sla_deadline %}
+              <span class="text-[10px] text-green-600 dark:text-green-400">✅</span>
+              {% else %}<span class="text-xs" style="color: var(--text-faint);">—</span>{% endif %}
+            </td>
+            <td class="px-3 py-3 text-xs whitespace-nowrap" style="color: var(--text-faint);">{{ format_date(ticket.created_at, lang) }}</td>
+            <td class="px-3 py-3">
+              <a href="/tickets/{{ ticket.id }}" class="text-primary hover:underline text-xs font-medium">
+                {{ t('app.view', lang=lang) }}
+              </a>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="10" class="py-12 text-center text-sm" style="color: var(--text-faint);">
+              {{ t('errors.no_data', lang=lang) }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {# Pagination #}
+    {% if total_pages > 1 %}
+    <div class="px-4 py-3 flex items-center justify-between" style="border-top: 1px solid var(--border-color);">
+      <p class="text-xs" style="color: var(--text-muted);">{{ t('app.page', lang=lang) }} {{ page }} / {{ total_pages }} — {{ total }} {{ t('app.records', lang=lang) }}</p>
+      <div class="flex gap-2">
+        {% if page > 1 %}
+        <a href="?page={{ page - 1 }}&q={{ q or '' }}&status={{ status or '' }}&priority={{ priority or '' }}&date_range={{ date_range or '' }}"
+           class="btn-secondary text-xs py-1.5">◀</a>
+        {% endif %}
+        {% if page < total_pages %}
+        <a href="?page={{ page + 1 }}&q={{ q or '' }}&status={{ status or '' }}&priority={{ priority or '' }}&date_range={{ date_range or '' }}"
+           class="btn-primary text-xs py-1.5">▶</a>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}

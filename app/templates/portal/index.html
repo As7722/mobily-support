@@ -1,0 +1,1254 @@
+{% extends "base.html" %}
+{% block title %}{{ t('portal.title', lang=lang) }} — موبايلي{% endblock %}
+
+{% block alert_banner %}
+{% if active_alerts %}
+  {% for alert in active_alerts %}
+  <div x-data="{ show: true }" x-show="show"
+       class="w-full py-3 px-4 text-white"
+       style="background: {% if alert.severity == 'critical' %}#dc2626{% elif alert.severity == 'warning' %}#d97706{% else %}#00AEEF{% endif %};">
+    <div class="mx-auto flex max-w-5xl items-center justify-between gap-4">
+      <p class="text-sm font-medium">{{ bl(alert, 'message', lang) }}</p>
+      <button @click="show = false" class="flex h-7 w-7 items-center justify-center rounded-lg hover:bg-white/15 transition shrink-0">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+  {% endfor %}
+{% endif %}
+{% endblock %}
+
+{% block navbar %}{% endblock %}
+{% block footer %}{% endblock %}
+
+{% block content %}
+<script>
+window._portalFormSchema = {{ form_schema | tojson | safe }};
+window._portalDepartments = {{ departments_json | safe }};
+</script>
+
+<style>
+  .portal-bg {
+    min-height: 100vh;
+    background: var(--bg-base);
+  }
+  /* Premium glowing gradient hero */
+  .portal-hero {
+    background: linear-gradient(135deg,
+      rgba(0,174,239,0.12) 0%,
+      rgba(0,174,239,0.04) 40%,
+      transparent 70%
+    );
+    border-bottom: 1px solid var(--border-color);
+    position: relative;
+    overflow: hidden;
+  }
+  .portal-hero::before {
+    content: '';
+    position: absolute;
+    top: -120px;
+    {% if dir == 'rtl' %}right: -80px;{% else %}left: -80px;{% endif %}
+    width: 420px;
+    height: 420px;
+    background: radial-gradient(circle, rgba(0,174,239,0.18) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .portal-hero::after {
+    content: '';
+    position: absolute;
+    bottom: -60px;
+    {% if dir == 'rtl' %}left: 60px;{% else %}right: 60px;{% endif %}
+    width: 280px;
+    height: 280px;
+    background: radial-gradient(circle, rgba(0,174,239,0.09) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  /* Floating card style */
+  .portal-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 20px;
+    transition: box-shadow 0.25s, border-color 0.25s;
+  }
+  .portal-card:hover {
+    border-color: rgba(0,174,239,0.22);
+    box-shadow: 0 8px 40px rgba(0,174,239,0.08);
+  }
+  /* Tab button */
+  .ptab-active {
+    background: #00AEEF !important;
+    color: #fff !important;
+    box-shadow: 0 4px 16px rgba(0,174,239,0.35);
+  }
+  /* Step badge */
+  .step-badge {
+    width: 28px; height: 28px;
+    background: linear-gradient(135deg, #00AEEF, #0090cc);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 12px; font-weight: 800;
+    flex-shrink: 0;
+    box-shadow: 0 2px 8px rgba(0,174,239,0.4);
+  }
+  /* Checklist item */
+  .chk-item {
+    border: 1.5px solid var(--border-color);
+    border-radius: 14px;
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: all 0.18s;
+    display: flex; align-items: flex-start; gap: 12px;
+  }
+  .chk-item:hover { border-color: rgba(0,174,239,0.5); background: rgba(0,174,239,0.04); }
+  .chk-item.chk-checked { border-color: #00AEEF; background: rgba(0,174,239,0.06); }
+  /* Custom checkbox */
+  .chk-box {
+    width: 22px; height: 22px; border-radius: 6px;
+    border: 2px solid var(--border-color);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; margin-top: 1px;
+    transition: all 0.18s;
+  }
+  .chk-checked .chk-box {
+    background: #00AEEF; border-color: #00AEEF;
+  }
+  /* KB Banner */
+  .kb-banner {
+    background: linear-gradient(135deg, rgba(0,174,239,0.1) 0%, rgba(0,174,239,0.04) 100%);
+    border: 1.5px solid rgba(0,174,239,0.25);
+    border-radius: 16px;
+    padding: 16px 20px;
+    display: flex; align-items: center; gap: 14px;
+  }
+  /* Success pulse */
+  @keyframes success-pop {
+    0% { transform: scale(0.8); opacity: 0; }
+    60% { transform: scale(1.06); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  .success-pop { animation: success-pop 0.45s cubic-bezier(.22,.68,0,1.2) forwards; }
+  /* Logo wordmark */
+  .mobily-wordmark {
+    font-size: 22px;
+    font-weight: 900;
+    color: #00AEEF;
+    letter-spacing: -0.5px;
+  }
+  .mobily-wordmark span { color: var(--text-ink); }
+</style>
+
+<div class="portal-bg">
+
+  <!-- ══ NAVBAR ══════════════════════════════════════════════════════════════ -->
+  <nav class="sticky top-0 z-40" style="background: var(--topbar-bg); border-bottom: 1px solid var(--border-color); backdrop-filter: blur(12px);">
+    <div class="mx-auto max-w-5xl px-5 h-[60px] flex items-center justify-between gap-4">
+
+      <!-- Brand -->
+      <a href="/portal" class="flex items-center gap-3 shrink-0">
+        <div class="flex h-9 w-9 items-center justify-center rounded-xl shrink-0" style="background: linear-gradient(135deg,#00AEEF,#0090cc); box-shadow: 0 4px 14px rgba(0,174,239,0.35);">
+          <svg class="h-[18px] w-[18px] text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 011.06 0z"/>
+          </svg>
+        </div>
+        <div class="hidden sm:block leading-none">
+          <p class="mobily-wordmark">mobily<span>.</span></p>
+          <p class="text-[10px] font-medium mt-0.5" style="color: var(--text-faint);">{{ lang == 'ar' and 'بوابة الدعم التقني' or 'Tech Support Portal' }}</p>
+        </div>
+      </a>
+
+      <!-- Right actions -->
+      <div class="flex items-center gap-2">
+
+        <!-- KB quick link -->
+        <a href="/portal/kb"
+           class="hidden sm:flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all hover:bg-primary/8 hover:border-primary/30"
+           style="border-color: var(--border-color); color: var(--text-muted);">
+          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/>
+          </svg>
+          {{ lang == 'ar' and 'قاعدة المعرفة' or 'Knowledge Base' }}
+        </a>
+
+        <!-- Lang toggle -->
+        <button hx-post="/api/language/toggle" hx-target="body" hx-swap="outerHTML"
+                hx-include="[name='current_path']"
+                class="flex items-center rounded-xl border px-2.5 py-1.5 text-[11px] font-bold transition-all hover:bg-[var(--bg-surface)]"
+                style="border-color: var(--border-color); color: var(--text-muted);">
+          {% if lang == 'ar' %}EN{% else %}عربي{% endif %}
+        </button>
+        <input type="hidden" name="current_path" value="{{ request.url.path }}">
+
+        <!-- Dark mode -->
+        <button @click="darkMode = !darkMode; document.cookie = 'dark_mode=' + (darkMode ? '1' : '0') + ';path=/;max-age=31536000'"
+                class="flex h-8 w-8 items-center justify-center rounded-xl border transition-all hover:bg-[var(--bg-surface)]"
+                style="border-color: var(--border-color);">
+          <svg x-show="!darkMode" class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color: var(--text-muted);">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+          </svg>
+          <svg x-show="darkMode" class="h-4 w-4 text-amber-400" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 2.25a.75.75 0 01.75.75v2.25a.75.75 0 01-1.5 0V3a.75.75 0 01.75-.75zM7.5 12a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ══ HERO ════════════════════════════════════════════════════════════════ -->
+  <div class="portal-hero">
+    <div class="mx-auto max-w-5xl px-5 py-12 sm:py-16 relative z-10">
+      <div class="max-w-2xl">
+
+        <!-- Live badge -->
+        <div class="inline-flex items-center gap-2 rounded-full px-3 py-1 mb-5 text-xs font-bold"
+             style="background: rgba(0,174,239,0.1); border: 1px solid rgba(0,174,239,0.25); color: #00AEEF;">
+          <span class="relative flex h-2 w-2">
+            <span class="absolute inline-flex h-full w-full rounded-full bg-primary opacity-75 animate-ping"></span>
+            <span class="relative inline-flex h-2 w-2 rounded-full bg-primary"></span>
+          </span>
+          {{ lang == 'ar' and 'الدعم التقني متاح على مدار الساعة' or '24/7 Technical Support' }}
+        </div>
+
+        <h1 class="text-3xl sm:text-4xl font-black mb-3 leading-tight" style="color: var(--text-ink);">
+          {% if lang == 'ar' %}
+            بوابة الدعم التقني
+            <br><span style="color: #00AEEF;">موبايلي</span>
+          {% else %}
+            Mobily <span style="color: #00AEEF;">Tech Support</span>
+          {% endif %}
+        </h1>
+        <p class="text-base" style="color: var(--text-muted);">
+          {{ lang == 'ar' and 'أرسل طلب دعم جديد أو تابع طلبًا موجودًا بكل سهولة وسرعة' or 'Submit a new support request or track an existing one quickly and easily' }}
+        </p>
+
+        <!-- Quick stats row -->
+        <div class="flex flex-wrap gap-5 mt-8">
+          {% set quick = [
+            ('97%', lang == 'ar' and 'معدل الرضا' or 'Satisfaction Rate'),
+            ('<2h', lang == 'ar' and 'متوسط وقت الحل' or 'Avg Resolution'),
+            ('24/7', lang == 'ar' and 'دعم مستمر' or 'Always On'),
+          ] %}
+          {% for val, label in quick %}
+          <div class="flex items-baseline gap-1.5">
+            <span class="text-xl font-black" style="color: #00AEEF;">{{ val }}</span>
+            <span class="text-xs" style="color: var(--text-faint);">{{ label }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ MAIN CONTENT ════════════════════════════════════════════════════════ -->
+  <div class="mx-auto max-w-5xl px-5 py-8" x-data="{
+    activeTab: '{{ active_tab | default('submit') }}',
+    checklist: { kb: false, support: false },
+    checklistDone: false,
+    submitted: false,
+    ticketNumber: '',
+    trackResult: null,
+    trackSearching: false,
+    submitLoading: false,
+    trackReplySending: false,
+    trackReplyDone: false,
+
+    get checklistComplete() { return this.checklist.kb && this.checklist.support; },
+
+    onTicketSubmitted(e) {
+      this.submitted   = true;
+      this.ticketNumber = e.detail.number;
+      this.submitLoading = false;
+    },
+
+    async submitTrackReply(token) {
+      const content = document.getElementById('track-reply-content').value.trim();
+      if (!content) { document.getElementById('track-reply-content').focus(); return; }
+      this.trackReplySending = true;
+      try {
+        const fd = new FormData();
+        fd.append('content', content);
+        const att = document.getElementById('track-attachment');
+        if (att && att.files[0]) fd.append('attachment', att.files[0]);
+        const r = await fetch('/api/portal/tickets/' + token + '/reply', {
+          method: 'POST', headers: { 'HX-Lang': '{{ lang }}' }, body: fd
+        });
+        if (r.ok) {
+          this.trackReplyDone = true;
+          document.getElementById('track-reply-content').value = '';
+          if (att) att.value = '';
+          setTimeout(() => {
+            const q = document.getElementById('track_query').value;
+            fetch('/api/portal/track?q=' + encodeURIComponent(q), { headers: { 'HX-Lang': '{{ lang }}' } })
+              .then(res => res.json()).then(d => { this.trackResult = d; this.trackReplyDone = false; });
+          }, 1500);
+        } else {
+          const err = await r.json().catch(() => ({}));
+          alert(err.detail || '{{ t('errors.server_error', lang=lang) }}');
+        }
+      } catch(e) { alert('{{ t('errors.server_error', lang=lang) }}'); }
+      this.trackReplySending = false;
+    }
+  }"
+  @portal-submitted.window="onTicketSubmitted($event)"
+  @portal-submit-loading.window="submitLoading = $event.detail.loading">
+
+
+    <!-- ── Tab Navigation ─────────────────────────────────────────────────── -->
+    <div class="flex rounded-2xl p-1.5 mb-6 shadow-sm" style="background: var(--bg-surface); border: 1px solid var(--border-color);">
+      {% for tab_id, icon_path, label in [
+        ('submit', 'M12 4.5v15m7.5-7.5h-15', lang == 'ar' and 'إرسال طلب جديد' or 'Submit Request'),
+        ('track', 'M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803 7.5 7.5 0 0016.803 15.803z', lang == 'ar' and 'تتبع طلب' or 'Track Request'),
+      ] %}
+      <button @click="activeTab = '{{ tab_id }}'"
+              :class="activeTab === '{{ tab_id }}' ? 'ptab-active' : ''"
+              :style="activeTab !== '{{ tab_id }}' ? 'color: var(--text-muted);' : ''"
+              class="flex-1 flex items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-bold transition-all duration-200">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ icon_path }}"/>
+        </svg>
+        {{ label }}
+      </button>
+      {% endfor %}
+    </div>
+
+    <!-- ══ TAB: SUBMIT ══════════════════════════════════════════════════════ -->
+    <div x-show="activeTab === 'submit'" x-transition class="space-y-5">
+
+      <!-- ── Success State ──────────────────────────────────────────────── -->
+      <div x-show="submitted" class="portal-card p-10 text-center success-pop">
+        <div class="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-full"
+             style="background: linear-gradient(135deg,rgba(16,185,129,0.15),rgba(16,185,129,0.08));">
+          <svg class="h-12 w-12 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+        <h2 class="text-2xl font-black mb-2" style="color: var(--text-ink);">{{ t('portal.success_title', lang=lang) }}</h2>
+        <p class="text-sm mb-6" style="color: var(--text-muted);">{{ t('portal.success_track_hint', lang=lang) }}</p>
+        <div class="inline-flex flex-col items-center rounded-2xl px-10 py-5 mb-6"
+             style="background: rgba(0,174,239,0.08); border: 1.5px solid rgba(0,174,239,0.2);">
+          <p class="text-xs font-semibold mb-1" style="color: #00AEEF; opacity:.75;">{{ t('portal.success_ticket_number', lang=lang) }}</p>
+          <p class="text-4xl font-black font-mono" style="color: #00AEEF;" x-text="ticketNumber"></p>
+        </div>
+        <div class="flex flex-col sm:flex-row gap-3 justify-center">
+          <button @click="submitted = false; ticketNumber = ''; checklistDone = false; files = []"
+                  class="btn-secondary rounded-xl">
+            {{ t('portal.success_new_ticket', lang=lang) }}
+          </button>
+          <button @click="activeTab = 'track'"
+                  class="btn-primary rounded-xl">
+            {{ t('portal.tab_track', lang=lang) }}
+          </button>
+        </div>
+      </div>
+
+      <!-- ── Checklist Gate ─────────────────────────────────────────────── -->
+      <div x-show="!checklistDone && !submitted" x-transition class="portal-card p-7">
+        <div class="flex items-center gap-4 mb-6">
+          <div class="flex h-12 w-12 items-center justify-center rounded-2xl shrink-0"
+               style="background: linear-gradient(135deg,rgba(245,158,11,0.18),rgba(245,158,11,0.08));">
+            <svg class="h-6 w-6 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/>
+            </svg>
+          </div>
+          <div>
+            <h3 class="text-lg font-black" style="color: var(--text-ink);">
+              {{ lang == 'ar' and 'قبل رفع الطلب' or 'Before Submitting' }}
+            </h3>
+            <p class="text-sm mt-0.5" style="color: var(--text-muted);">
+              {{ lang == 'ar' and 'يرجى التحقق من النقطتين التاليتين' or 'Please confirm the following two points' }}
+            </p>
+          </div>
+        </div>
+
+        <!-- Checklist items -->
+        <div class="space-y-3 mb-6">
+
+          <!-- Item 1: Knowledge Base -->
+          <label class="chk-item" :class="checklist.kb ? 'chk-checked' : ''"
+                 @click="checklist.kb = !checklist.kb">
+            <div class="chk-box">
+              <svg x-show="checklist.kb" class="h-3.5 w-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M4.5 12.75l6 6 9-13.5"/>
+              </svg>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold" style="color: var(--text-ink);">
+                {{ lang == 'ar' and 'هل اطلعت على قاعدة المعرفة؟' or 'Did you check the Knowledge Base?' }}
+              </p>
+              <p class="text-xs mt-1" style="color: var(--text-muted);">
+                {{ lang == 'ar' and 'قاعدة المعرفة تحتوي على حلول لأغلب المشاكل الشائعة' or 'The knowledge base contains solutions for most common issues' }}
+              </p>
+              <a href="/portal/kb" target="_blank" @click.stop
+                 class="inline-flex items-center gap-1 mt-1.5 text-xs font-bold"
+                 style="color: #00AEEF;">
+                <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/>
+                </svg>
+                {{ lang == 'ar' and 'فتح قاعدة المعرفة' or 'Open Knowledge Base' }}
+              </a>
+            </div>
+          </label>
+
+          <!-- Item 2: Tech Support relevance -->
+          <label class="chk-item" :class="checklist.support ? 'chk-checked' : ''"
+                 @click="checklist.support = !checklist.support">
+            <div class="chk-box">
+              <svg x-show="checklist.support" class="h-3.5 w-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M4.5 12.75l6 6 9-13.5"/>
+              </svg>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold" style="color: var(--text-ink);">
+                {{ lang == 'ar' and 'هل المشكلة تخص قسم الدعم التقني؟' or 'Is this issue related to Tech Support?' }}
+              </p>
+              <p class="text-xs mt-1" style="color: var(--text-muted);">
+                {{ lang == 'ar' and 'تأكد أن المشكلة ضمن نطاق الدعم التقني وليست إدارية أو مالية' or 'Ensure the issue is within tech support scope, not administrative or financial' }}
+              </p>
+            </div>
+          </label>
+        </div>
+
+        <!-- Progress indicator -->
+        <div class="flex items-center gap-3 mb-5">
+          <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background: var(--bg-surface);">
+            <div class="h-full rounded-full transition-all duration-500"
+                 style="background: linear-gradient(90deg,#00AEEF,#0090cc);"
+                 :style="'width:' + (checklist.kb && checklist.support ? '100' : checklist.kb || checklist.support ? '50' : '0') + '%'"></div>
+          </div>
+          <span class="text-xs font-bold" style="color: var(--text-faint);"
+                x-text="(checklist.kb && checklist.support ? '2' : checklist.kb || checklist.support ? '1' : '0') + '/2'"></span>
+        </div>
+
+        <button @click="if(checklistComplete) checklistDone = true"
+                :disabled="!checklistComplete"
+                :class="checklistComplete
+                  ? 'text-white hover:opacity-90 active:scale-[.98]'
+                  : 'opacity-40 cursor-not-allowed'"
+                :style="checklistComplete
+                  ? 'background: linear-gradient(135deg,#00AEEF,#0090cc); box-shadow: 0 4px 20px rgba(0,174,239,0.4);'
+                  : 'background: var(--bg-surface); color: var(--text-muted);'"
+                class="w-full flex items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-bold transition-all">
+          <span>{{ lang == 'ar' and 'متابعة ورفع الطلب' or 'Continue to Submit' }}</span>
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                  d="{% if dir == 'rtl' %}M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18{% else %}M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3{% endif %}"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- ── Submission Form ────────────────────────────────────────────── -->
+      <div x-show="checklistDone && !submitted" x-transition class="space-y-5"
+           x-data="portalForm()" x-init="initForm()">
+
+        <form id="ticket-form" class="space-y-5" @submit.prevent="submitForm()" novalidate>
+          <input type="hidden" name="channel" value="portal">
+
+          <!-- Step 1: Employee Verification -->
+          <div class="portal-card p-6">
+            <div class="flex items-center gap-3 mb-3">
+              <div class="step-badge">1</div>
+              <div>
+                <h3 class="text-sm font-bold" style="color: var(--text-ink);">
+                  {{ lang == 'ar' and 'التحقق من بيانات الموظف' or 'Employee Verification' }}
+                  <span class="text-red-500 ms-1">*</span>
+                </h3>
+                <p class="text-xs" style="color: var(--text-muted);">
+                  {{ lang == 'ar' and 'أدخل الرقم الوظيفي أو رقم الجوال للتحقق من هويتك' or 'Enter your employee ID or phone number to verify your identity' }}
+                </p>
+              </div>
+            </div>
+
+            <!-- Search bar (hidden after verification) -->
+            <div x-show="!empVerified" class="flex gap-2 mb-3">
+              <div class="relative flex-1">
+                <svg class="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color: var(--text-faint);">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0"/>
+                </svg>
+                <input type="text" id="autofill_query"
+                       placeholder="{{ lang == 'ar' and 'الرقم الوظيفي أو رقم الجوال...' or 'Employee ID or phone number...' }}"
+                       class="form-input ps-9 rounded-xl" dir="ltr"
+                       @keydown.enter.prevent="doAutofill()">
+              </div>
+              <button type="button" @click="doAutofill()"
+                      class="btn-primary rounded-xl shrink-0" :disabled="autofillLoading">
+                <svg x-show="autofillLoading" class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
+                <span x-show="!autofillLoading">{{ lang == 'ar' and 'تحقق' or 'Verify' }}</span>
+              </button>
+            </div>
+
+            <!-- ✅ Verified — Read-only employee info card -->
+            <div x-show="empVerified" x-transition>
+              <!-- Info grid -->
+              <div class="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-900/10 p-4 mb-3">
+                <div class="flex items-center justify-between mb-3">
+                  <div class="flex items-center gap-2">
+                    <div class="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40 shrink-0">
+                      <svg class="h-4 w-4 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                      </svg>
+                    </div>
+                    <span class="text-xs font-bold text-emerald-700 dark:text-emerald-400">
+                      {{ lang == 'ar' and 'تم التحقق من البيانات' or 'Identity Verified' }}
+                    </span>
+                  </div>
+                  <button type="button" @click="resetEmployee()"
+                          class="text-xs font-bold hover:underline" style="color: #00AEEF;">
+                    {{ lang == 'ar' and 'تغيير' or 'Change' }}
+                  </button>
+                </div>
+                <!-- Two-column grid of fields -->
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div>
+                    <p class="text-[10px] font-bold uppercase tracking-wide mb-0.5" style="color: var(--text-faint);">{{ lang == 'ar' and 'الاسم الكامل' or 'Full Name' }}</p>
+                    <p class="text-sm font-semibold" style="color: var(--text-ink);" x-text="empData.full_name_{{ lang }} || empData.full_name_ar || '—'"></p>
+                  </div>
+                  <div>
+                    <p class="text-[10px] font-bold uppercase tracking-wide mb-0.5" style="color: var(--text-faint);">{{ lang == 'ar' and 'الرقم الوظيفي' or 'Employee ID' }}</p>
+                    <p class="text-sm font-semibold font-mono" style="color: var(--text-ink);" dir="ltr" x-text="empData.employee_id || '—'"></p>
+                  </div>
+                  <div>
+                    <p class="text-[10px] font-bold uppercase tracking-wide mb-0.5" style="color: var(--text-faint);">{{ lang == 'ar' and 'رقم الجوال' or 'Phone' }}</p>
+                    <p class="text-sm font-semibold font-mono" style="color: var(--text-ink);" dir="ltr" x-text="empData.phone || '—'"></p>
+                  </div>
+                  <div>
+                    <p class="text-[10px] font-bold uppercase tracking-wide mb-0.5" style="color: var(--text-faint);">{{ lang == 'ar' and 'البريد الإلكتروني' or 'Email' }}</p>
+                    <p class="text-sm font-semibold" style="color: var(--text-ink);" x-text="empData.email || '—'"></p>
+                  </div>
+                  <div>
+                    <p class="text-[10px] font-bold uppercase tracking-wide mb-0.5" style="color: var(--text-faint);">{{ lang == 'ar' and 'الفرع' or 'Branch' }}</p>
+                    <p class="text-sm font-semibold" style="color: var(--text-ink);" x-text="empData.branch_name || '—'"></p>
+                  </div>
+                  <div x-show="empData.position">
+                    <p class="text-[10px] font-bold uppercase tracking-wide mb-0.5" style="color: var(--text-faint);">{{ lang == 'ar' and 'المنصب' or 'Position' }}</p>
+                    <p class="text-sm font-semibold" style="color: var(--text-ink);" x-text="empData.position || '—'"></p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Hidden inputs — submitted with form -->
+              <input type="hidden" name="branch_employee_id" :value="empData.branch_employee_id || ''">
+              <input type="hidden" name="submitter_name"     :value="empData.full_name_ar || ''">
+              <input type="hidden" name="submitter_phone"    :value="empData.phone || ''">
+              <input type="hidden" name="submitter_email"    :value="empData.email || ''">
+              <input type="hidden" name="employee_id"        :value="empData.employee_id || ''">
+              <input type="hidden" name="branch_id"          :value="empData.branch_id || ''">
+            </div>
+
+            <!-- Not Found -->
+            <div x-show="empSearched && !empVerified && !autofillLoading" x-transition
+                 class="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-900/15 p-4">
+              <p class="text-sm font-bold text-amber-700 dark:text-amber-400 mb-3">
+                {{ lang == 'ar' and 'لم يتم العثور على بياناتك في النظام' or 'Your data was not found in the system' }}
+              </p>
+              <div x-show="!regSubmitted" class="rounded-xl border p-4 space-y-3"
+                   style="border-color: var(--border-color); background: var(--bg-card);">
+                <p class="text-xs font-bold" style="color: var(--text-ink);">
+                  {{ lang == 'ar' and 'طلب تسجيل بيانات جديدة' or 'New Registration Request' }}
+                </p>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label class="text-[10px] font-semibold block mb-1" style="color: var(--text-muted);">{{ lang == 'ar' and 'الاسم الكامل' or 'Full Name' }} <span class="text-red-500">*</span></label>
+                    <input type="text" x-model="regName" class="form-input text-sm" placeholder="{{ lang == 'ar' and 'الاسم...' or 'Name...' }}">
+                  </div>
+                  <div>
+                    <label class="text-[10px] font-semibold block mb-1" style="color: var(--text-muted);">{{ lang == 'ar' and 'رقم الجوال' or 'Phone' }} <span class="text-red-500">*</span></label>
+                    <input type="tel" x-model="regPhone" class="form-input text-sm" placeholder="05XXXXXXXX" dir="ltr">
+                  </div>
+                  <div>
+                    <label class="text-[10px] font-semibold block mb-1" style="color: var(--text-muted);">{{ lang == 'ar' and 'الرقم الوظيفي' or 'Employee ID' }}</label>
+                    <input type="text" x-model="regEmpId" class="form-input text-sm" placeholder="EMP-XXXX" dir="ltr">
+                  </div>
+                </div>
+                <div x-show="regError" x-transition class="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-3 py-2 flex items-center gap-2">
+                  <svg class="h-4 w-4 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+                  </svg>
+                  <p class="text-xs text-red-600 dark:text-red-400 font-medium" x-text="regError"></p>
+                </div>
+                <button type="button" @click="submitRegistration()" :disabled="regLoading"
+                        class="btn-primary text-xs py-2 w-full justify-center rounded-xl">
+                  <svg x-show="regLoading" class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                  </svg>
+                  <span x-show="!regLoading">{{ lang == 'ar' and 'إرسال طلب التسجيل' or 'Submit Registration' }}</span>
+                </button>
+              </div>
+              <div x-show="regSubmitted" class="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-4 text-center">
+                <svg class="mx-auto h-8 w-8 text-emerald-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <p class="text-sm font-bold text-emerald-700 dark:text-emerald-400" x-text="regMessage"></p>
+                <p class="text-xs mt-1" style="color: var(--text-muted);">{{ lang == 'ar' and 'رقم الطلب:' or 'Request:' }} <span class="font-mono font-bold" style="color:#00AEEF;" x-text="regTicketNumber"></span></p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Dynamic Sections -->
+          <template x-if="empVerified">
+          <div class="space-y-5">
+
+          <template x-for="(section, si) in formSections" :key="section.id">
+            <div class="portal-card p-6" x-show="isSectionVisible(section.id)" x-transition>
+              <div class="flex items-center gap-3 mb-4">
+                <div class="step-badge" x-text="si + 2"></div>
+                <h3 class="text-sm font-bold" style="color: var(--text-ink);"
+                    x-text="section.title_{{ lang }} || section.title_ar || section.title_en"></h3>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <template x-for="field in getSectionFields(section.id)" :key="field.id">
+                  <div :class="field.half_width ? '' : 'sm:col-span-2'"
+                       x-show="isFieldVisible(field)" x-transition>
+
+                    <template x-if="field.type === 'heading'">
+                      <h3 class="text-[15px] font-bold pt-2" style="color: var(--text-ink);" x-text="field.label_{{ lang }} || field.label_ar"></h3>
+                    </template>
+                    <template x-if="field.type === 'divider'">
+                      <hr style="border: none; border-top: 1px solid var(--border-color); margin: 8px 0;">
+                    </template>
+
+                    <!-- System: Branch -->
+                    <template x-if="field.key === '_sys_branch'">
+                      <div>
+                        <label class="form-label"><span x-text="field.label_{{ lang }} || field.label_ar"></span><span x-show="field.required" class="text-red-500">*</span></label>
+                        <select id="branch_id" name="branch_id" :required="field.required" class="form-input">
+                          <option value="">{{ t('portal.select_branch', lang=lang) }}</option>
+                          {% for branch in branches %}
+                          <option value="{{ branch.id }}">{{ bl(branch, 'name', lang) }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                    </template>
+
+                    <!-- System: Category -->
+                    <template x-if="field.key === '_sys_category'">
+                      <div>
+                        <label class="form-label"><span x-text="field.label_{{ lang }} || field.label_ar"></span><span x-show="field.required" class="text-red-500">*</span></label>
+                        <select id="category_id" name="category_id" :required="field.required" class="form-input"
+                                @change="formValues['_sys_category'] = $event.target.value"
+                                hx-get="/api/portal/subcategories" hx-trigger="change"
+                                hx-target="#subcategory-container" hx-include="[name='category_id']">
+                          <option value="">{{ t('portal.select_category', lang=lang) }}</option>
+                          {% for cat in categories %}
+                          <option value="{{ cat.id }}">{{ bl(cat, 'name', lang) }}</option>
+                          {% endfor %}
+                        </select>
+                        <div id="subcategory-container" class="mt-3"></div>
+                      </div>
+                    </template>
+
+                    <!-- Standard fields -->
+                    <template x-if="!['heading','divider'].includes(field.type) && !field.key?.startsWith('_sys_')">
+                      <div>
+                        <label class="form-label">
+                          <span x-text="field.label_{{ lang }} || field.label_ar"></span>
+                          <span x-show="isFieldRequired(field)" class="text-red-500 ms-0.5">*</span>
+                        </label>
+                        <template x-if="['text','email','tel','number','date','time'].includes(field.type)">
+                          <input :type="field.type"
+                                 :name="field.system ? field.key : 'custom_' + field.key"
+                                 :id="field.key"
+                                 :placeholder="field['placeholder_{{ lang }}'] || field.placeholder_ar || ''"
+                                 :required="isFieldRequired(field)"
+                                 :minlength="isFieldVisible(field) ? (field.min_length || undefined) : undefined"
+                                 :maxlength="field.max_length || undefined"
+                                 :dir="field.dir ? field.dir : (['tel','email'].includes(field.type) ? 'ltr' : undefined)"
+                                 x-model="formValues[field.key]"
+                                 class="form-input">
+                        </template>
+                        <template x-if="field.type === 'textarea'">
+                          <div>
+                            <textarea :name="field.system ? field.key : 'custom_' + field.key"
+                                      :id="field.key"
+                                      :placeholder="field['placeholder_{{ lang }}'] || field.placeholder_ar || ''"
+                                      :required="isFieldRequired(field)"
+                                      :minlength="isFieldVisible(field) ? (field.min_length || undefined) : undefined"
+                                      rows="5"
+                                      x-model="formValues[field.key]"
+                                      class="form-input resize-none"
+                                      @input="$el.nextElementSibling.textContent = $el.value.length + (field.min_length ? ' / ' + field.min_length : '') + ' {{ 'حرفاً' if lang == 'ar' else 'chars' }}'"></textarea>
+                            <p class="mt-1 text-xs" style="color: var(--text-faint);">
+                              <span x-text="(formValues[field.key] || '').length + (field.min_length ? ' / ' + field.min_length : '') + ' {{ 'حرفاً' if lang == 'ar' else 'chars' }}'"></span>
+                            </p>
+                          </div>
+                        </template>
+                        <template x-if="field.type === 'select'">
+                          <select :name="field.system ? field.key : 'custom_' + field.key"
+                                  :id="field.key" :required="isFieldRequired(field)"
+                                  x-model="formValues[field.key]" class="form-input">
+                            <option value="">{{ lang == 'ar' and '-- اختر --' or '-- Select --' }}</option>
+                            <template x-for="opt in (field.options || [])" :key="opt.value">
+                              <option :value="opt.value" x-text="opt['label_{{ lang }}'] || opt.label_ar || opt.label_en"></option>
+                            </template>
+                          </select>
+                        </template>
+                        <template x-if="field.type === 'radio'">
+                          <div class="grid grid-cols-2 gap-2 mt-1">
+                            <template x-for="opt in (field.options || [])" :key="opt.value">
+                              <label class="flex items-center gap-2.5 cursor-pointer rounded-xl border px-3.5 py-2.5 hover:border-primary/40 transition"
+                                     style="border-color: var(--border-color);"
+                                     :class="formValues[field.key] === opt.value ? 'border-primary/50 bg-primary/5' : ''">
+                                <input type="radio" :name="field.system ? field.key : 'custom_' + field.key"
+                                       :value="opt.value" x-model="formValues[field.key]"
+                                       :required="isFieldRequired(field)"
+                                       style="accent-color: #00AEEF;">
+                                <span class="text-sm font-medium" style="color: var(--text-ink);" x-text="opt['label_{{ lang }}'] || opt.label_ar || opt.label_en"></span>
+                              </label>
+                            </template>
+                          </div>
+                        </template>
+                        <template x-if="field.type === 'checkbox' && field.options && field.options.length > 0">
+                          <div class="space-y-2 mt-1">
+                            <template x-for="opt in field.options" :key="opt.value">
+                              <label class="flex items-center gap-2.5 cursor-pointer rounded-xl border px-3.5 py-2.5 hover:border-primary/40 transition" style="border-color: var(--border-color);">
+                                <input type="checkbox" :name="'custom_' + field.key" :value="opt.value" style="accent-color: #00AEEF;">
+                                <span class="text-sm" style="color: var(--text-ink);" x-text="opt['label_{{ lang }}'] || opt.label_ar || opt.label_en"></span>
+                              </label>
+                            </template>
+                          </div>
+                        </template>
+                        <template x-if="field.type === 'checkbox' && (!field.options || field.options.length === 0)">
+                          <label class="flex items-center gap-2.5 cursor-pointer mt-1">
+                            <input type="checkbox" :name="'custom_' + field.key" x-model="formValues[field.key]" style="accent-color: #00AEEF;">
+                            <span class="text-sm" style="color: var(--text-ink);" x-text="field['label_{{ lang }}'] || field.label_ar"></span>
+                          </label>
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+
+          <!-- Attachments -->
+          <div class="portal-card p-6">
+            <div class="flex items-center gap-3 mb-4">
+              <div class="step-badge" x-text="formSections.length + 2"></div>
+              <div>
+                <h3 class="text-sm font-bold" style="color: var(--text-ink);">{{ t('portal.attachments', lang=lang) }}</h3>
+                <p class="text-xs" style="color: var(--text-faint);">({{ t('app.optional', lang=lang) if t('app.optional', lang=lang) != 'app.optional' else 'اختياري' }})</p>
+              </div>
+            </div>
+            <div class="rounded-xl border-2 border-dashed p-8 text-center hover:border-primary hover:bg-primary/4 transition-all duration-200 cursor-pointer"
+                 style="border-color: var(--border-color);"
+                 @dragover.prevent="$el.classList.add('border-primary','bg-primary/5')"
+                 @dragleave="$el.classList.remove('border-primary','bg-primary/5')"
+                 @drop.prevent="$el.classList.remove('border-primary','bg-primary/5'); Array.from($event.dataTransfer.files).forEach(f => { if(f.size<=10*1024*1024) files.push(f); })"
+                 @click="$refs.fileInput.click()">
+              <svg class="mx-auto h-10 w-10 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color: var(--text-faint);">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+              </svg>
+              <p class="text-sm font-medium" style="color: var(--text-ink);">{{ t('portal.attachments_hint', lang=lang) }}</p>
+              <p class="text-xs mt-1" style="color: var(--text-faint);">PDF, JPG, PNG, ZIP — {{ 'الحد الأقصى 10 MB' if lang == 'ar' else 'Max 10 MB' }}</p>
+              <input type="file" x-ref="fileInput" multiple class="hidden" accept=".pdf,.jpg,.jpeg,.png,.gif,.zip,.doc,.docx,.txt"
+                     @change="Array.from($event.target.files).forEach(f => { if(f.size<=10*1024*1024) files.push(f); })">
+            </div>
+            <ul class="mt-3 space-y-2" x-show="files.length > 0">
+              <template x-for="(file, idx) in files" :key="idx">
+                <li class="flex items-center gap-3 rounded-xl border px-3 py-2.5" style="border-color: var(--border-color); background: var(--bg-surface);">
+                  <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color: var(--text-faint);">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
+                  </svg>
+                  <span class="text-sm truncate flex-1" style="color: var(--text-ink);" x-text="file.name"></span>
+                  <span class="text-xs shrink-0" style="color: var(--text-faint);" x-text="(file.size/1024).toFixed(0)+' KB'"></span>
+                  <button type="button" @click="files.splice(idx,1)"
+                          class="flex h-6 w-6 items-center justify-center rounded-lg hover:bg-red-100 hover:text-red-500 transition shrink-0" style="color: var(--text-faint);">
+                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                  </button>
+                </li>
+              </template>
+            </ul>
+          </div>
+
+          <!-- Form Error -->
+          <div x-show="formError" x-transition
+               class="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 px-4 py-3 flex items-center gap-3">
+            <svg class="h-5 w-5 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+            </svg>
+            <p class="text-sm text-red-600 dark:text-red-400 font-medium" x-text="formError"></p>
+          </div>
+
+          <!-- Submit -->
+          <button type="submit" :disabled="submitLoading"
+                  class="w-full flex items-center justify-center gap-2.5 rounded-2xl py-4 text-base font-bold text-white transition-all hover:opacity-90 active:scale-[.98]"
+                  style="background: linear-gradient(135deg,#00AEEF,#0090cc); box-shadow: 0 6px 24px rgba(0,174,239,0.45);">
+            <svg x-show="submitLoading" class="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+            <span x-show="!submitLoading" class="flex items-center gap-2">
+              <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/>
+              </svg>
+              {{ t('portal.submit_btn', lang=lang) }}
+            </span>
+            <span x-show="submitLoading">{{ t('portal.submitting', lang=lang) }}</span>
+          </button>
+
+          </div>
+          </template>
+        </form>
+      </div>
+    </div>
+
+    <!-- ══ TAB: TRACK ════════════════════════════════════════════════════════ -->
+    <div x-show="activeTab === 'track'" x-transition class="space-y-5">
+      <div class="portal-card p-7">
+        <div class="flex items-center gap-4 mb-5">
+          <div class="flex h-12 w-12 items-center justify-center rounded-2xl shrink-0"
+               style="background: rgba(0,174,239,0.12);">
+            <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color:#00AEEF;">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803 7.5 7.5 0 0016.803 15.803z"/>
+            </svg>
+          </div>
+          <div>
+            <h2 class="text-base font-black" style="color: var(--text-ink);">{{ t('portal.track_title', lang=lang) }}</h2>
+            <p class="text-xs mt-0.5" style="color: var(--text-muted);">{{ t('portal.track_subtitle', lang=lang) }}</p>
+          </div>
+        </div>
+
+        <div class="flex gap-2">
+          <div class="relative flex-1">
+            <svg class="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color: var(--text-faint);">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803 7.5 7.5 0 0016.803 15.803z"/>
+            </svg>
+            <input type="text" id="track_query"
+                   placeholder="{{ t('portal.track_placeholder', lang=lang) }}"
+                   dir="ltr" class="form-input ps-9 font-mono rounded-xl"
+                   @keydown.enter="
+                     trackSearching = true; trackResult = null;
+                     fetch('/api/portal/track?q=' + encodeURIComponent($el.value), {headers: {'HX-Lang': '{{ lang }}'}})
+                       .then(r => r.json()).then(d => { trackResult = d; trackSearching = false; })
+                       .catch(() => { trackSearching = false; });">
+          </div>
+          <button @click="
+                   trackSearching = true; trackResult = null;
+                   const q = document.getElementById('track_query').value;
+                   fetch('/api/portal/track?q=' + encodeURIComponent(q), {headers: {'HX-Lang': '{{ lang }}'}})
+                     .then(r => r.json()).then(d => { trackResult = d; trackSearching = false; })
+                     .catch(() => { trackSearching = false; });"
+                  class="btn-primary rounded-xl shrink-0">
+            <svg x-show="trackSearching" class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+            <span x-show="!trackSearching">{{ t('portal.track_btn', lang=lang) }}</span>
+          </button>
+        </div>
+
+        <!-- Results -->
+        <div x-show="trackResult" x-transition class="mt-6">
+
+          <div x-show="trackResult && !trackResult.found"
+               class="flex items-center gap-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4">
+            <svg class="h-5 w-5 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m9.303 3.376c.866 1.5-.217 3.374-1.948 3.374H4.645c-1.73 0-2.813-1.874-1.948-3.374L10.05 3.378c.866-1.5 3.032-1.5 3.898 0L21.303 16.126zM12 15.75h.007v.008H12v-.008z"/>
+            </svg>
+            <p class="text-sm text-amber-700 dark:text-amber-400">{{ t('portal.track_not_found', lang=lang) }}</p>
+          </div>
+
+          <template x-if="trackResult && trackResult.found">
+            <div class="space-y-4">
+              <!-- Ticket header -->
+              <div class="rounded-2xl border p-5" style="border-color: var(--border-color); background: var(--bg-surface);">
+                <div class="flex items-start justify-between gap-4 flex-wrap mb-2">
+                  <div>
+                    <p class="font-mono text-xl font-extrabold" style="color: var(--text-ink);" x-text="trackResult.ticket_number"></p>
+                    <p class="text-sm mt-0.5" style="color: var(--text-muted);" x-text="trackResult.subject || ''"></p>
+                  </div>
+                  <span class="badge"
+                        :class="{
+                          'badge-new': trackResult.status === 'new',
+                          'badge-open': trackResult.status === 'open',
+                          'badge-pending_customer': trackResult.status === 'pending_customer',
+                          'badge-pending_3rd': trackResult.status === 'pending_3rd',
+                          'badge-resolved': trackResult.status === 'resolved',
+                          'badge-closed': ['closed','archived'].includes(trackResult.status)
+                        }"
+                        x-text="trackResult.status_label"></span>
+                </div>
+              </div>
+
+              <!-- Replies -->
+              <div>
+                <h3 class="text-sm font-semibold mb-3" style="color: var(--text-ink);">
+                  {{ lang == 'ar' and 'الردود' or 'Replies' }}
+                </h3>
+                <div class="space-y-0">
+                  <template x-for="(event, idx) in (trackResult.replies || [])" :key="event.id">
+                    <div class="flex gap-3">
+                      <div class="flex flex-col items-center">
+                        <div class="flex h-8 w-8 items-center justify-center rounded-full shrink-0"
+                             :style="event.actor_type === 'customer' ? 'background:rgba(59,130,246,0.12)' : 'background:rgba(0,174,239,0.12)'">
+                          <svg class="h-4 w-4" :style="event.actor_type === 'customer' ? 'color:#3B82F6' : 'color:#00AEEF'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z"/>
+                          </svg>
+                        </div>
+                        <div class="mt-1 mb-1 flex-1 w-px" style="background: var(--border-color);" x-show="idx < (trackResult.replies.length - 1)"></div>
+                      </div>
+                      <div class="pb-4 min-w-0 flex-1">
+                        <p class="text-sm" style="color: var(--text-ink);" x-text="event.content"></p>
+                        <p class="text-[11px] mt-0.5" style="color: var(--text-faint);" x-text="event.created_at_label"></p>
+                      </div>
+                    </div>
+                  </template>
+                  <p x-show="!trackResult.replies || trackResult.replies.length === 0"
+                     class="text-center text-xs py-4" style="color: var(--text-faint);">
+                    {{ lang == 'ar' and 'لا توجد ردود بعد' or 'No replies yet' }}
+                  </p>
+                </div>
+              </div>
+
+              <!-- Reply form (pending_customer) -->
+              <template x-if="trackResult.status === 'pending_customer'">
+                <div class="rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-900/15 p-5">
+                  <p class="text-sm font-semibold text-amber-700 dark:text-amber-400 mb-4">{{ t('ticket.waiting_your_reply', lang=lang) }}</p>
+
+                  <div x-show="trackReplyDone" x-transition
+                       class="flex items-center gap-2 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 px-4 py-3 mb-3">
+                    <svg class="h-5 w-5 text-emerald-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <p class="text-sm font-medium text-emerald-700 dark:text-emerald-400">{{ t('ticket.reply_sent', lang=lang) }}</p>
+                  </div>
+
+                  <div x-show="!trackReplyDone">
+                    <textarea id="track-reply-content" rows="3"
+                              placeholder="{{ t('ticket.reply_placeholder', lang=lang) }}"
+                              class="form-input resize-none mb-3 w-full"
+                              :disabled="trackReplySending"></textarea>
+
+                    <!-- Attachment -->
+                    <div class="mb-4 rounded-xl border border-dashed p-3.5" style="border-color: var(--border-color); background: var(--bg-card);">
+                      <div class="flex items-center gap-3">
+                        <svg class="h-5 w-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color: var(--text-faint);">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13"/>
+                        </svg>
+                        <div class="flex-1 min-w-0">
+                          <label for="track-attachment" class="cursor-pointer text-sm font-medium text-primary">{{ t('ticket.attach_file', lang=lang) }}</label>
+                          <p class="text-xs mt-0.5" style="color: var(--text-faint);">JPG, PNG, PDF — Max 10 MB</p>
+                        </div>
+                        <span id="track-file-name" class="hidden text-xs text-primary font-medium truncate max-w-[130px]"></span>
+                        <button type="button" id="track-file-clear" class="hidden flex h-6 w-6 items-center justify-center rounded-lg hover:text-red-500 transition" style="color: var(--text-faint);"
+                                onclick="document.getElementById('track-attachment').value='';var nm=document.getElementById('track-file-name');var cl=document.getElementById('track-file-clear');nm.textContent='';nm.classList.add('hidden');cl.classList.add('hidden');">
+                          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                      </div>
+                      <input type="file" id="track-attachment"
+                             class="mt-2.5 w-full text-sm file:me-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-primary file:text-white hover:file:opacity-90 file:cursor-pointer"
+                             style="color: var(--text-muted);"
+                             accept=".jpg,.jpeg,.png,.gif,.pdf,.doc,.docx,.xls,.xlsx,.zip,.txt"
+                             :disabled="trackReplySending"
+                             onchange="var n=this.files[0]?this.files[0].name:'';var nm=document.getElementById('track-file-name');var cl=document.getElementById('track-file-clear');if(n){nm.textContent=n;nm.classList.remove('hidden');cl.classList.remove('hidden');}else{nm.textContent='';nm.classList.add('hidden');cl.classList.add('hidden');}">
+                    </div>
+
+                    <button @click="submitTrackReply(trackResult.token)" :disabled="trackReplySending"
+                            class="btn-primary rounded-xl">
+                      <svg x-show="trackReplySending" class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                      </svg>
+                      <svg x-show="!trackReplySending" class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/>
+                      </svg>
+                      {{ t('ticket.reply_btn', lang=lang) }}
+                    </button>
+                  </div>
+                </div>
+              </template>
+
+              <!-- Reopen prompt -->
+              <template x-if="['closed','resolved'].includes(trackResult.status)">
+                <div class="flex items-start gap-3 rounded-2xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/15 p-4">
+                  <svg class="h-5 w-5 text-blue-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"/>
+                  </svg>
+                  <div class="flex-1">
+                    <p class="text-sm text-blue-700 dark:text-blue-300 mb-3">{{ t('portal.reopen_prompt', lang=lang) }}</p>
+                    <button @click="activeTab = 'submit'; checklistDone = false;" class="btn-primary btn-sm rounded-xl">
+                      {{ t('portal.reopen_btn', lang=lang) }}
+                    </button>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ FOOTER ═══════════════════════════════════════════════════════════════ -->
+  <footer class="mt-10 border-t py-5" style="border-color: var(--border-color);">
+    <div class="mx-auto max-w-5xl px-5 flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <div class="flex h-7 w-7 items-center justify-center rounded-lg"
+             style="background: linear-gradient(135deg,#00AEEF,#0090cc);">
+          <svg class="h-3.5 w-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 011.06 0z"/>
+          </svg>
+        </div>
+        <p class="text-xs font-bold" style="color: var(--text-ink);">mobily</p>
+        <span class="text-xs" style="color: var(--text-faint);">&copy; {{ now.year if now else 2026 }}</span>
+      </div>
+      <p class="text-xs" style="color: var(--text-faint);">
+        {{ lang == 'ar' and 'بوابة الدعم التقني الداخلية' or 'Internal Tech Support Portal' }}
+      </p>
+    </div>
+  </footer>
+</div>
+
+<script>
+function portalForm() {
+  return {
+    formSections: [],
+    formFields: [],
+    formValues: {},
+    empVerified: false,
+    empSearched: false,
+    empData: {},
+    regName: '',
+    regPhone: '',
+    regEmpId: '',
+    regLoading: false,
+    regSubmitted: false,
+    regMessage: '',
+    regTicketNumber: '',
+    regError: '',
+    formError: '',
+    submitLoading: false,
+    autofillLoading: false,
+    files: [],
+
+    initForm() {
+      // Build form dynamically from DB departments + their portal_fields
+      var dbDepts = window._portalDepartments || [];
+
+      this.formSections = [
+        { id:'sec_dept',    title_ar:'القسم ونوع المشكلة', title_en:'Department & Issue'  },
+        { id:'sec_contact', title_ar:'بيانات التواصل',     title_en:'Contact Info'        },
+        { id:'sec_ticket',  title_ar:'بيانات التذكرة',     title_en:'Ticket Details'      },
+      ];
+
+      // Build department dropdown options from DB
+      var deptOptions = dbDepts.map(function(d) {
+        return { value: d.code, label_ar: d.name_ar, label_en: d.name_en };
+      });
+
+      var fields = [
+        { id:'f_dept', key:'department', type:'select', label_ar:'القسم المختص', label_en:'Department',
+          required:true, section:'sec_dept', system:false, options: deptOptions },
+      ];
+
+      // For each department, inject its portal_fields with conditions
+      dbDepts.forEach(function(dept) {
+        (dept.portal_fields || []).forEach(function(pf, idx) {
+          var f = JSON.parse(JSON.stringify(pf));
+          f.id = f.id || ('f_' + dept.code + '_' + idx);
+          f.key = f.key || (dept.code + '_field_' + idx);
+          f.section = 'sec_dept';
+          f.system = false;
+          f.conditions = [{ field:'department', operator:'equals', value: dept.code }];
+          if (f.type === 'select' && !f.options) f.options = [];
+          fields.push(f);
+        });
+      });
+
+      // Shared fields: contact + ticket details
+      fields.push(
+        { id:'f_ct_phone', key:'contact_phone', type:'tel', label_ar:'رقم الجوال', label_en:'Phone Number',
+          placeholder_ar:'05XXXXXXXX', placeholder_en:'05XXXXXXXX',
+          required_when:{ field:'department', equals:'absher' }, section:'sec_contact', system:false, half_width:true, dir:'ltr' },
+        { id:'f_ct_name', key:'contact_name', type:'text', label_ar:'الاسم', label_en:'Name',
+          placeholder_ar:'اسم الشخص المعني', placeholder_en:'Contact person name',
+          required_when:{ field:'department', equals:'absher' }, section:'sec_contact', system:false, half_width:true },
+        { id:'f_cust', key:'customer_number', type:'text',
+          label_ar:'رقم العميل / رقم الحساب', label_en:'Customer / Account Number',
+          placeholder_ar:'أدخل رقم العميل', placeholder_en:'Enter customer number',
+          required:false, required_when:{ field:'department', equals:'technical_support' },
+          section:'sec_ticket', system:false, half_width:true, dir:'ltr' },
+        { id:'f_subj', key:'subject', type:'text', label_ar:'عنوان المشكلة', label_en:'Issue Title',
+          placeholder_ar:'عنوان مختصر للمشكلة', placeholder_en:'Brief issue title',
+          required:true, section:'sec_ticket', system:true, half_width:true },
+        { id:'f_desc', key:'description', type:'textarea', label_ar:'وصف المشكلة', label_en:'Problem Description',
+          placeholder_ar:'اشرح المشكلة بالتفصيل...', placeholder_en:'Describe the issue in detail...',
+          required:true, section:'sec_ticket', system:true, min_length:10 }
+      );
+
+      this.formFields = fields;
+
+      var vals = {};
+      for (var i=0; i<this.formFields.length; i++) { vals[this.formFields[i].key]=''; }
+      this.formValues = vals;
+    },
+
+    getSectionFields(sectionId) {
+      return this.formFields.filter(function(f){ return f.section===sectionId; });
+    },
+
+    isSectionVisible(sectionId) {
+      if (sectionId === 'sec_contact') {
+        return (this.formValues['department'] || '') === 'absher';
+      }
+      return true;
+    },
+
+    isFieldVisible(field) {
+      if (!field.conditions || field.conditions.length===0) return true;
+      var self=this;
+      return field.conditions.every(function(cond){
+        var val=self.formValues[cond.field]||'';
+        switch(cond.operator){
+          case 'equals':     return val===cond.value;
+          case 'not_equals': return val!==cond.value;
+          case 'contains':   return val.indexOf(cond.value)>=0;
+          case 'not_empty':  return val!==''&&val!==null&&val!==undefined;
+          case 'is_empty':   return val===''||val===null||val===undefined;
+          default: return true;
+        }
+      });
+    },
+
+    isFieldRequired(field) {
+      if (!this.isFieldVisible(field)) return false;
+      if (field.required_when) {
+        return this.formValues[field.required_when.field] === field.required_when.equals;
+      }
+      return !!field.required;
+    },
+
+    doAutofill() {
+      var self=this;
+      var q=document.getElementById('autofill_query').value.trim();
+      if(!q||q.length<3) return;
+      self.autofillLoading=true; self.empSearched=false; self.empVerified=false;
+      fetch('/api/portal/autofill?q='+encodeURIComponent(q))
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          self.empSearched=true;
+          if(d.found){
+            self.empVerified=true; self.empData=d;
+            self.formValues['submitter_name']  = d.full_name_{{ lang }}||d.full_name_ar||'';
+            self.formValues['submitter_phone'] = d.phone||'';
+            self.formValues['submitter_email'] = d.email||'';
+            self.formValues['employee_id']     = d.employee_id||'';
+            self.$nextTick(function(){
+              if(d.branch_id){ var br=document.getElementById('branch_id'); if(br) br.value=d.branch_id; }
+            });
+          }
+          self.autofillLoading=false;
+        })
+        .catch(function(){ self.empSearched=true; self.autofillLoading=false; });
+    },
+
+    resetEmployee() {
+      this.empVerified=false; this.empSearched=false; this.empData={};
+      this.formValues['submitter_name']=''; this.formValues['submitter_phone']='';
+      this.formValues['submitter_email']=''; this.formValues['employee_id']='';
+      var el=document.getElementById('autofill_query'); if(el){el.value=''; el.focus();}
+    },
+
+    submitRegistration() {
+      var self=this; self.regError='';
+      if(!self.regName.trim()||(!self.regPhone.trim()&&!self.regEmpId.trim())){
+        self.regError='{{ lang == "ar" and "يرجى إدخال الاسم ورقم الجوال أو الرقم الوظيفي" or "Please enter name and phone or employee ID" }}';
+        return;
+      }
+      self.regLoading=true;
+      fetch('/api/portal/register-employee',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:self.regName.trim(),phone:self.regPhone.trim(),employee_id:self.regEmpId.trim()})})
+        .then(function(r){ return r.json(); })
+        .then(function(d){
+          if(d.ok){ self.regSubmitted=true; self.regMessage=d.message; self.regTicketNumber=d.ticket_number||''; }
+          else { self.regError=d.detail||d.message||'{{ lang == "ar" and "حدث خطأ، يرجى المحاولة لاحقاً" or "An error occurred" }}'; }
+          self.regLoading=false;
+        })
+        .catch(function(){ self.regLoading=false; self.regError='{{ lang == "ar" and "حدث خطأ في الاتصال" or "Connection error" }}'; });
+    },
+
+    submitForm() {
+      var self=this;
+      self.formError='';
+
+      // Client-side validation: check visible required fields
+      var missing = [];
+      self.formFields.forEach(function(f) {
+        if (self.isFieldVisible(f) && self.isFieldRequired(f)) {
+          var val = self.formValues[f.key] || '';
+          if (!val.toString().trim()) {
+            missing.push(f.label_{{ lang }} || f.label_ar || f.key);
+          }
+        }
+      });
+      if (missing.length > 0) {
+        self.formError = '{{ lang == "ar" and "يرجى تعبئة الحقول المطلوبة: " or "Please fill required fields: " }}' + missing.join('، ');
+        return;
+      }
+
+      self.submitLoading=true;
+      self.$dispatch('portal-submit-loading', { loading: true });
+
+      var form = document.getElementById('ticket-form');
+      if (!form) {
+        self.formError = '{{ lang == "ar" and "خطأ داخلي" or "Internal error" }}';
+        self.submitLoading=false;
+        self.$dispatch('portal-submit-loading', { loading: false });
+        return;
+      }
+
+      var fd = new FormData(form);
+
+      // Inject all formValues as custom_ fields (Alpine x-model may not sync to DOM for dynamic fields)
+      self.formFields.forEach(function(f) {
+        if (f.system) return;
+        var val = self.formValues[f.key];
+        if (val !== undefined && val !== null && val !== '') {
+          var fname = 'custom_' + f.key;
+          if (!fd.has(fname) || !fd.get(fname)) {
+            fd.set(fname, val);
+          }
+        }
+      });
+
+      (self.files||[]).forEach(function(f){ fd.append('attachments',f); });
+
+      fetch('/api/tickets/submit', { method:'POST', body:fd, headers:{'HX-Lang':'{{ lang }}'} })
+        .then(function(r){
+          if (!r.ok && r.status !== 422) {
+            return r.text().then(function(t){ return { _rawError: t, status: r.status }; });
+          }
+          return r.json().catch(function(){ return { _rawError: 'JSON parse error', status: r.status }; });
+        })
+        .then(function(d){
+          self.submitLoading=false;
+          self.$dispatch('portal-submit-loading', { loading: false });
+          if(d && d.ticket_number){
+            self.$dispatch('portal-submitted', { number: d.ticket_number });
+          } else if(d && d._rawError){
+            self.formError = '{{ lang == "ar" and "خطأ في الخادم" or "Server error" }} (' + d.status + ')';
+          } else {
+            self.formError = (d && d.detail)
+              ? d.detail
+              : '{{ lang == "ar" and "حدث خطأ، يرجى المحاولة لاحقاً" or "An error occurred, please try again" }}';
+          }
+        })
+        .catch(function(err){
+          self.submitLoading=false;
+          self.$dispatch('portal-submit-loading', { loading: false });
+          self.formError='{{ lang == "ar" and "تعذّر الاتصال بالخادم" or "Could not connect to server" }}';
+        });
+    }
+  };
+}
+</script>
+{% endblock %}

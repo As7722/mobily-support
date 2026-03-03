@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+
+{% block title %}{{ t('csat.title', lang=lang) }} — {{ t('app.title', lang=lang) }}{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-gradient-to-b from-primary/5 to-white dark:from-primary/10 dark:to-gray-950 flex items-center justify-center py-10 px-4">
+  <div class="w-full max-w-lg">
+
+    {% if already_submitted %}
+    <!-- Already submitted -->
+    <div class="card p-10 text-center">
+      <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full" style="background: var(--bg-surface);">
+        <svg class="h-7 w-7" style="color: var(--text-faint);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+      </div>
+      <h2 class="text-lg font-bold" style="color: var(--text-ink);">{{ t('csat.already_submitted', lang=lang) }}</h2>
+    </div>
+
+    {% elif expired %}
+    <!-- Expired -->
+    <div class="card p-10 text-center">
+      <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900">
+        <svg class="h-7 w-7 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+      </div>
+      <h2 class="text-lg font-bold" style="color: var(--text-ink);">{{ t('csat.expired', lang=lang) }}</h2>
+    </div>
+
+    {% elif submitted %}
+    <!-- Thank you state -->
+    <div class="card p-10 text-center fade-in">
+      <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100 dark:bg-green-900">
+        <svg class="h-8 w-8 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+        </svg>
+      </div>
+      <h2 class="text-2xl font-bold mb-2" style="color: var(--text-ink);">{{ t('csat.thank_you', lang=lang) }}</h2>
+      <p style="color: var(--text-muted);">{{ t('csat.thank_you_body', lang=lang) }}</p>
+    </div>
+
+    {% else %}
+    <!-- Survey form -->
+    <div class="card" x-data="{
+          overall: 0,
+          speed: 0,
+          professionalism: 0,
+          clarity: 0,
+          submitting: false,
+          error: '',
+          hoverStar(field, n) { this[field + 'Hover'] = n; },
+          overallHover: 0, speedHover: 0, professionalismHover: 0, clarityHover: 0,
+          starLabels: {{ {"1": t('csat.stars.1', lang=lang), "2": t('csat.stars.2', lang=lang), "3": t('csat.stars.3', lang=lang), "4": t('csat.stars.4', lang=lang), "5": t('csat.stars.5', lang=lang)} | tojson }}
+        }">
+
+      <!-- Header -->
+      <div class="rounded-t-2xl p-6 text-white" style="background: #00AEEF;">
+        <div class="flex items-center gap-3 mb-2">
+          <div class="flex h-10 w-10 items-center justify-center rounded-full bg-white/20">
+            <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/>
+            </svg>
+          </div>
+          <div>
+            <h1 class="text-lg font-bold">{{ t('csat.title', lang=lang) }}</h1>
+            <p class="text-sm text-white/80">{{ t('csat.subtitle', lang=lang) }}</p>
+          </div>
+        </div>
+        {% if survey.ticket %}
+        <div class="mt-3 rounded-lg bg-white/10 px-3 py-2 text-sm">
+          {{ t('csat.ticket_ref', lang=lang) }}: <span class="font-mono font-bold">{{ survey.ticket.ticket_number }}</span>
+        </div>
+        {% endif %}
+      </div>
+
+      <form method="POST" action="/api/csat/{{ token }}/submit" class="p-6 space-y-6"
+            @submit.prevent="
+              if (!overall) { error = '{{ t('csat.required_overall', lang=lang) }}'; return; }
+              submitting = true;
+              const fd = new FormData($el);
+              fetch($el.action, { method: 'POST', body: fd })
+                .then(r => r.json())
+                .then(d => { if(d.ok) { window.location.reload(); } else { submitting = false; error = d.detail; } })
+                .catch(() => { submitting = false; });
+            ">
+
+        <!-- Overall Rating -->
+        <div>
+          <label class="form-label text-base font-semibold">{{ t('csat.overall', lang=lang) }} <span class="text-red-500">*</span></label>
+          <div class="mt-2 flex gap-2">
+            {% for n in range(1, 6) %}
+            <button type="button"
+                    @click="overall = {{ n }}"
+                    @mouseover="overallHover = {{ n }}"
+                    @mouseleave="overallHover = 0"
+                    :title="starLabels['{{ n }}']"
+                    class="text-3xl transition-transform hover:scale-110 active:scale-95">
+              <span :class="(overallHover || overall) >= {{ n }} ? 'text-amber-400' : '[color:var(--text-faint)]'">★</span>
+            </button>
+            {% endfor %}
+          </div>
+          <input type="hidden" name="rating_overall" :value="overall">
+          <p x-show="overall > 0" class="mt-1 text-xs text-amber-600" x-text="starLabels[String(overall)]"></p>
+          <p x-show="error" class="form-error" x-text="error"></p>
+        </div>
+
+        <!-- Dimension ratings -->
+        <div class="border-t pt-5" style="border-color: var(--border-color);">
+          <h3 class="text-sm font-semibold mb-4" style="color: var(--text-ink);">{{ t('csat.dimensions_title', lang=lang) }}</h3>
+          <div class="space-y-4">
+
+            {% for field, label_key in [('speed', 'csat.resolution_speed'), ('professionalism', 'csat.agent_professionalism'), ('clarity', 'csat.clarity')] %}
+            <div class="flex items-center justify-between">
+              <span class="text-sm" style="color: var(--text-muted);">{{ t(label_key, lang=lang) }}</span>
+              <div class="flex gap-1">
+                {% for n in range(1, 6) %}
+                <button type="button"
+                        @click="{{ field }} = {{ n }}"
+                        @mouseover="{{ field }}Hover = {{ n }}"
+                        @mouseleave="{{ field }}Hover = 0"
+                        class="text-xl transition-transform hover:scale-110">
+                  <span :class="({{ field }}Hover || {{ field }}) >= {{ n }} ? 'text-amber-400' : '[color:var(--text-faint)]'">★</span>
+                </button>
+                {% endfor %}
+              </div>
+              <input type="hidden" name="rating_{{ field }}" :value="{{ field }}">
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- Comments -->
+        <div>
+          <label class="form-label">{{ t('csat.comments_optional', lang=lang) }}</label>
+          <textarea name="comments" rows="3"
+                    placeholder="{{ t('csat.comments_placeholder', lang=lang) }}"
+                    class="form-input resize-none"></textarea>
+        </div>
+
+        <!-- Submit -->
+        <button type="submit" :disabled="submitting" class="btn-primary w-full justify-center py-3">
+          <span x-show="!submitting">{{ t('csat.submit', lang=lang) }}</span>
+          <span x-show="submitting" class="flex items-center gap-2">
+            <svg class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            {{ t('csat.submitting', lang=lang) }}
+          </span>
+        </button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

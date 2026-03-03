@@ -1,0 +1,378 @@
+{% extends "base.html" %}
+{% block title %}{{ t('auth.login_title', lang=lang) }} — موبايلي{% endblock %}
+{% block footer %}{% endblock %}
+
+{% block extra_head %}
+<style type="text/tailwindcss">
+  /* ── Split Screen Layout ────────────────────────────── */
+  .login-page {
+    min-height: 100vh;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  @media (max-width: 768px) {
+    .login-page { grid-template-columns: 1fr; }
+    .brand-panel { display: none; }
+  }
+
+  /* ── Brand Panel (Left / end in RTL) ────────────────── */
+  .brand-panel {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: linear-gradient(145deg, #050D1C 0%, #0B1832 40%, #0D2550 70%, #061628 100%);
+  }
+  .brand-panel::before {
+    content: '';
+    position: absolute; inset: 0;
+    background-image: radial-gradient(circle at 1px 1px, rgba(0,174,239,0.08) 1px, transparent 0);
+    background-size: 28px 28px;
+    pointer-events: none;
+  }
+  .brand-orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    pointer-events: none;
+    animation: float-orb 16s ease-in-out infinite;
+  }
+  .brand-orb-1 {
+    width: 50vw; height: 50vw;
+    background: radial-gradient(circle, rgba(0,174,239,0.30), transparent 70%);
+    top: -15%; left: -10%;
+    animation-delay: 0s;
+  }
+  .brand-orb-2 {
+    width: 35vw; height: 35vw;
+    background: radial-gradient(circle, rgba(0,94,184,0.35), transparent 70%);
+    bottom: 5%; right: -5%;
+    animation-delay: -6s;
+  }
+  .brand-orb-3 {
+    width: 25vw; height: 25vw;
+    background: radial-gradient(circle, rgba(0,174,239,0.15), transparent 70%);
+    top: 40%; left: 30%;
+    animation-delay: -12s;
+  }
+
+  /* Decorative shapes (solid, no blur) */
+  .glass-shape {
+    position: absolute;
+    border: 1px solid #1E3A5F;
+    border-radius: 24px;
+    background: #0D2550;
+    pointer-events: none;
+    opacity: 0.5;
+  }
+  .gs-1 { width: 220px; height: 220px; top: 8%; right: 10%; transform: rotate(15deg); border-radius: 40% 60% 50% 60% / 50% 40% 60% 50%; }
+  .gs-2 { width: 140px; height: 140px; bottom: 12%; left: 15%; transform: rotate(-20deg); }
+  .gs-3 { width: 80px; height: 80px; top: 50%; left: 8%; transform: rotate(30deg); border-radius: 50%; }
+
+  /* Network lines decorative */
+  .net-line {
+    position: absolute;
+    background: linear-gradient(90deg, transparent, rgba(0,174,239,0.2), transparent);
+    height: 1px;
+    width: 70%;
+    left: 15%;
+    pointer-events: none;
+  }
+
+  /* Brand center content */
+  .brand-content {
+    position: relative; z-index: 10;
+    display: flex; flex-direction: column;
+    align-items: center; text-align: center;
+    padding: 3rem;
+    max-width: 420px;
+  }
+  .brand-logo-wrap {
+    width: 88px; height: 88px;
+    border-radius: 24px;
+    display: flex; align-items: center; justify-content: center;
+    background: #00AEEF;
+    margin-bottom: 1.5rem;
+  }
+
+  /* ── Login Panel (Right / start in RTL) ─────────────── */
+  .login-panel {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    background: var(--bg-base);
+    position: relative;
+  }
+  .login-card {
+    width: 100%;
+    max-width: 420px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 24px;
+    padding: 2.5rem;
+    box-shadow: var(--shadow-up);
+    animation: scaleInModal 0.35s cubic-bezier(0.34,1.56,0.64,1) both;
+  }
+
+  .fl-wrap { position: relative; }
+  .fl-input {
+    display: block;
+    width: 100%;
+    padding: 1.25rem 1rem 0.4rem;
+    border-radius: 14px;
+    border: 1.5px solid var(--border-color);
+    background: var(--bg-muted);
+    color: var(--text-ink);
+    font-size: 0.9375rem;
+    font-family: inherit;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    outline: none;
+  }
+  .fl-input:focus {
+    border-color: #00AEEF;
+    box-shadow: 0 0 0 3px rgba(0, 174, 239, 0.2);
+  }
+  .fl-label {
+    position: absolute;
+    inset-inline-start: 1rem;
+    top: 50%; transform: translateY(-50%);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    pointer-events: none;
+    transition: all 0.2s cubic-bezier(0.4,0,0.2,1);
+    white-space: nowrap;
+  }
+  .fl-input:focus ~ .fl-label,
+  .fl-input:not(:placeholder-shown) ~ .fl-label {
+    top: 0.6rem; transform: translateY(0);
+    font-size: 0.65rem; font-weight: 700; letter-spacing: 0.06em;
+    color: var(--cyan);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="login-page">
+
+  <!-- ════════════════════════════════════════════════════════
+       BRAND PANEL — Left / End side
+  ════════════════════════════════════════════════════════ -->
+  <div class="brand-panel {% if dir == 'rtl' %}order-last{% endif %}">
+    <!-- Glow orbs -->
+    <div class="brand-orb brand-orb-1"></div>
+    <div class="brand-orb brand-orb-2"></div>
+    <div class="brand-orb brand-orb-3"></div>
+
+    <!-- Glassmorphism shapes -->
+    <div class="glass-shape gs-1"></div>
+    <div class="glass-shape gs-2"></div>
+    <div class="glass-shape gs-3"></div>
+
+    <!-- Network decorative lines -->
+    <div class="net-line" style="top: 30%;"></div>
+    <div class="net-line" style="top: 60%; opacity: 0.5;"></div>
+    <div class="net-line" style="top: 75%; opacity: 0.3; width: 40%; left: 30%;"></div>
+
+    <!-- Brand Content -->
+    <div class="brand-content">
+      <div class="brand-logo-wrap">
+        <img src="/static/mobily-logo.png" alt="موبايلي" class="h-14 w-14 object-contain"
+             onerror="this.outerHTML='<span class=\'text-5xl font-black text-cyan-400\'>M</span>'">
+      </div>
+
+      <h1 class="text-3xl font-black text-white mb-3 leading-tight" style="letter-spacing: -0.02em;">
+        {% if lang == 'ar' %}نظام الدعم التقني{% else %}Tech Support System{% endif %}
+      </h1>
+      <p class="text-base font-medium mb-8" style="color: rgba(148,163,184,0.9);">
+        {% if lang == 'ar' %}موبايلي — Consumer Operations{% else %}Mobily — Consumer Operations{% endif %}
+      </p>
+
+      <!-- Feature pills -->
+      <div class="flex flex-col gap-3 w-full">
+        {% for icon_path, label in [
+          ('M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+           'إدارة تذاكر الدعم بكفاءة عالية' if lang == 'ar' else 'High-efficiency ticket management'),
+          ('M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z',
+           'تحليلات فورية وتقارير متقدمة' if lang == 'ar' else 'Real-time analytics & advanced reports'),
+          ('M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z',
+           'أمان عالي وإدارة صلاحيات متقدمة' if lang == 'ar' else 'High security & advanced permissions')
+        ] %}
+        <div class="flex items-center gap-3 rounded-2xl px-4 py-3"
+             style="background: #0D2550; border: 1px solid #1E3A5F;">
+          <div class="flex h-8 w-8 items-center justify-center rounded-xl shrink-0"
+               style="background: #164E63;">
+            <svg class="h-4 w-4" style="color: #00AEEF;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ icon_path }}"/>
+            </svg>
+          </div>
+          <p class="text-sm font-medium text-start" style="color: #E2E8F0;">{{ label }}</p>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════
+       LOGIN PANEL — Right / Start side
+  ════════════════════════════════════════════════════════ -->
+  <div class="login-panel">
+    <!-- Theme + Language toggle (top corner) -->
+    <div class="absolute top-5 {% if dir == 'rtl' %}start-5{% else %}end-5{% endif %} flex items-center gap-2">
+      <button @click="darkMode = !darkMode; document.documentElement.classList.toggle('dark', darkMode); document.cookie='dark_mode=' + (darkMode ? '1' : '0') + ';path=/;max-age=31536000'"
+              class="flex h-9 w-9 items-center justify-center rounded-xl border transition-all duration-200"
+              style="background: var(--bg-surface); border-color: var(--border-color); color: var(--text-muted);">
+        <svg x-show="!darkMode" class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+        </svg>
+        <svg x-show="darkMode" class="h-4 w-4 text-amber-400" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M12 2.25a.75.75 0 01.75.75v2.25a.75.75 0 01-1.5 0V3a.75.75 0 01.75-.75zM7.5 12a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0z"/>
+        </svg>
+      </button>
+      <button hx-post="/api/language/toggle" hx-target="body" hx-swap="outerHTML"
+              hx-include="[name='current_path']"
+              class="flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition-all duration-200"
+              style="background: var(--bg-surface); border-color: var(--border-color); color: var(--text-muted);">
+        {% if lang == 'ar' %}EN{% else %}عربي{% endif %}
+      </button>
+      <input type="hidden" name="current_path" value="/login">
+    </div>
+
+    <!-- Login Card -->
+    <div class="login-card"
+         x-data="{
+           loading: false,
+           error: '',
+           username: '',
+           password: '',
+           showPass: false,
+           async submit() {
+             if (!this.username || !this.password) return;
+             this.loading = true; this.error = '';
+             try {
+               const res = await fetch('/api/auth/login', {
+                 method: 'POST',
+                 headers: { 'Content-Type': 'application/json' },
+                 credentials: 'same-origin',
+                 body: JSON.stringify({ username: this.username, password: this.password })
+               });
+               const data = await res.json();
+               if (res.ok) {
+                 window.location.href = new URLSearchParams(window.location.search).get('next') || '/dashboard';
+               } else {
+                 this.error = data.detail || '{% if lang == 'ar' %}بيانات غير صحيحة{% else %}Invalid credentials{% endif %}';
+               }
+             } catch(e) {
+               this.error = '{% if lang == 'ar' %}حدث خطأ، حاول مرة أخرى{% else %}An error occurred{% endif %}';
+             } finally { this.loading = false; }
+           }
+         }"
+         @keydown.enter="submit()">
+
+      <!-- Card Header -->
+      <div class="mb-8">
+        <h2 class="text-2xl font-black mb-1" style="color: var(--text-ink); letter-spacing: -0.02em;">
+          {% if lang == 'ar' %}مرحباً بعودتك{% else %}Welcome back{% endif %}
+        </h2>
+        <p class="text-sm" style="color: var(--text-muted);">
+          {% if lang == 'ar' %}سجّل دخولك للمتابعة{% else %}Sign in to continue{% endif %}
+        </p>
+      </div>
+
+      <!-- Error Alert -->
+      <div x-show="error" x-transition
+           class="mb-5 flex items-center gap-3 rounded-2xl border px-4 py-3"
+           style="background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.25); color: #EF4444;">
+        <svg class="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+        </svg>
+        <span class="text-sm font-medium" x-text="error"></span>
+      </div>
+
+      <!-- Username Field -->
+      <div class="fl-wrap mb-4">
+        <input id="username" type="text"
+               class="fl-input"
+               placeholder=" "
+               x-model="username"
+               autocomplete="username"
+               autofocus>
+        <label for="username" class="fl-label">
+          {% if lang == 'ar' %}اسم المستخدم{% else %}Username{% endif %}
+        </label>
+      </div>
+
+      <!-- Password Field -->
+      <div class="fl-wrap mb-6 relative">
+        <input id="password"
+               :type="showPass ? 'text' : 'password'"
+               class="fl-input pe-12"
+               placeholder=" "
+               x-model="password"
+               autocomplete="current-password">
+        <label for="password" class="fl-label">
+          {% if lang == 'ar' %}كلمة المرور{% else %}Password{% endif %}
+        </label>
+        <!-- Eye toggle -->
+        <button type="button" @click="showPass = !showPass" tabindex="-1"
+                class="absolute inset-y-0 end-0 flex items-center pe-4 transition-colors duration-200"
+                style="color: var(--text-faint);">
+          <svg x-show="!showPass" class="h-5 w-5 hover:text-cyan-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+          <svg x-show="showPass" class="h-5 w-5 hover:text-cyan-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Submit Button -->
+      <button type="button" @click="submit()"
+              :disabled="loading || !username || !password"
+              class="w-full flex items-center justify-center gap-3 rounded-2xl py-3.5 text-base font-bold text-white transition-all duration-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+              style="background: #00AEEF;"
+              onmouseover="this.style.background='#0095CC'"
+              onmouseout="this.style.background='#00AEEF'">
+        <svg x-show="loading" class="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+        </svg>
+        <svg x-show="!loading" class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"/>
+        </svg>
+        <span x-show="loading">{% if lang == 'ar' %}جارٍ الدخول...{% else %}Signing in...{% endif %}</span>
+        <span x-show="!loading">{% if lang == 'ar' %}دخول{% else %}Sign In{% endif %}</span>
+      </button>
+
+      <!-- Divider -->
+      <div class="flex items-center gap-3 my-6">
+        <div class="flex-1 h-px" style="background: var(--border-color);"></div>
+        <span class="text-xs font-medium" style="color: var(--text-faint);">
+          {% if lang == 'ar' %}أو{% else %}or{% endif %}
+        </span>
+        <div class="flex-1 h-px" style="background: var(--border-color);"></div>
+      </div>
+
+      <!-- Portal Link -->
+      <a href="/portal"
+         class="flex items-center justify-center gap-2 rounded-2xl border py-3 text-sm font-semibold transition-all duration-200"
+         style="border-color: var(--border-color); color: var(--text-muted);"
+         onmouseover="this.style.borderColor='rgba(0,174,239,0.4)'; this.style.color='#00AEEF';"
+         onmouseout="this.style.borderColor='var(--border-color)'; this.style.color='var(--text-muted)';">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/>
+        </svg>
+        {% if lang == 'ar' %}بوابة الدعم الخارجية{% else %}Public Support Portal{% endif %}
+      </a>
+
+      <!-- Footer -->
+      <p class="mt-6 text-center text-xs" style="color: var(--text-faint);">
+        Mobily Tech Support &copy; {{ now.year if now else 2026 }}
+      </p>
+    </div>
+  </div>
+</div>
+{% endblock %}

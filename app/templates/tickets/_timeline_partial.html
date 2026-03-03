@@ -1,0 +1,114 @@
+{% if timeline %}
+{% for event in timeline %}
+<div data-event-type="{{ event.event_type }}"
+     data-public="{{ 'true' if event.is_public else 'false' }}"
+     class="tl-event-item">
+
+  {% if event.event_type in ['reply_external', 'reply_internal', 'reply_customer'] %}
+  {# ── MESSAGE BUBBLE ──────────────────────────────────────────── #}
+  <div class="msg-bubble
+    {% if event.event_type == 'reply_internal' %}msg-internal
+    {% elif event.event_type == 'reply_customer' %}msg-customer
+    {% else %}msg-agent{% endif %}">
+
+    {# Header #}
+    <div class="msg-header">
+      <div class="flex items-center gap-2">
+        {# Avatar #}
+        <div class="msg-avatar
+          {% if event.event_type == 'reply_internal' %}msg-avatar-internal
+          {% elif event.event_type == 'reply_customer' %}msg-avatar-customer
+          {% else %}msg-avatar-agent{% endif %}">
+          {% if event.actor %}{{ (event.actor.full_name_ar or '?')[0] | upper }}
+          {% elif event.event_type == 'reply_customer' %}ع
+          {% else %}و{% endif %}
+        </div>
+        <div>
+          <p class="msg-sender">
+            {% if event.actor %}
+              {{ event.actor.full_name_ar if lang == 'ar' else (event.actor.full_name_en or event.actor.full_name_ar) }}
+            {% elif event.event_type == 'reply_customer' %}{{ t('timeline.customer', lang=lang) }}
+            {% else %}{{ t('timeline.system', lang=lang) if t('timeline.system', lang=lang) != 'timeline.system' else 'النظام' }}{% endif %}
+          </p>
+          <p class="msg-time">{{ format_date(event.created_at, lang) }}</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        {% if not event.is_public %}
+        <span class="badge-internal">
+          <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+          </svg>
+          {{ t('ticket_detail.internal_only', lang=lang) if t('ticket_detail.internal_only', lang=lang) != 'ticket_detail.internal_only' else 'داخلي' }}
+        </span>
+        {% endif %}
+        {% if event.event_type == 'reply_customer' %}
+        <span class="badge-customer-tag">{{ t('timeline.customer', lang=lang) if t('timeline.customer', lang=lang) != 'timeline.customer' else 'العميل' }}</span>
+        {% elif event.event_type == 'reply_external' %}
+        <span class="badge-agent-tag">{{ t('timeline.reply_external', lang=lang) if t('timeline.reply_external', lang=lang) != 'timeline.reply_external' else 'رد خارجي' }}</span>
+        {% endif %}
+      </div>
+    </div>
+
+    {# Content #}
+    <div class="msg-body">
+      <p class="msg-text">{% if lang == 'ar' %}{{ event.content_ar or '' }}{% else %}{{ event.content_en or event.content_ar or '' }}{% endif %}</p>
+    </div>
+
+    {# Attachments — iterate over the relationship #}
+    {% if event.attachments %}
+    <div class="msg-attachment">
+      {% for att in event.attachments %}
+      <a href="/api/tickets/{{ event.ticket_id }}/attachments/{{ att.id }}"
+         target="_blank" class="msg-attach-link">
+        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+        </svg>
+        {{ att.file_name }}
+        {% if att.file_size %}
+        <span style="font-size:10px;opacity:0.6;margin-inline-start:4px;">
+          ({{ (att.file_size / 1024) | round(1) }} KB)
+        </span>
+        {% endif %}
+      </a>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  {% else %}
+  {# ── ACTIVITY LOG ITEM (shown in sidebar) ─────────────────────── #}
+  <div class="activity-item
+    {% if event.event_type in ['resolved','closed'] %}activity-resolved
+    {% elif event.event_type == 'sla_breach' %}activity-breach
+    {% elif event.event_type == 'escalated' %}activity-escalate
+    {% else %}activity-default{% endif %}">
+    <div class="activity-dot
+      {% if event.event_type in ['resolved','closed'] %}dot-green
+      {% elif event.event_type == 'sla_breach' %}dot-red
+      {% elif event.event_type == 'escalated' %}dot-orange
+      {% elif event.event_type == 'ticket_created' %}dot-blue
+      {% elif event.event_type == 'status_changed' %}dot-amber
+      {% else %}dot-gray{% endif %}"></div>
+    <div class="activity-content">
+      <p class="activity-text">
+        {% if lang == 'ar' %}{{ event.content_ar or '' }}{% else %}{{ event.content_en or event.content_ar or '' }}{% endif %}
+      </p>
+      <div class="activity-meta">
+        <span>{{ format_date(event.created_at, lang) }}</span>
+        {% if event.actor %}<span>· {{ event.actor.full_name_ar if lang == 'ar' else (event.actor.full_name_en or event.actor.full_name_ar) }}</span>{% endif %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+{% endfor %}
+{% else %}
+<div class="empty-conversation">
+  <svg class="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+  </svg>
+  <p>{{ t('timeline.no_events', lang=lang) if t('timeline.no_events', lang=lang) != 'timeline.no_events' else 'لا توجد رسائل بعد' }}</p>
+</div>
+{% endif %}

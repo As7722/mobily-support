@@ -1,0 +1,161 @@
+{% extends "base_app.html" %}
+
+{% block title %}{% if lang == "ar" %}قاعدة المعرفة{% else %}Knowledge Base{% endif %}{% endblock %}
+
+{% block page_title %}{% if lang == "ar" %}قاعدة المعرفة{% else %}Knowledge Base{% endif %}{% endblock %}
+
+{% block content %}
+<div class="p-6 max-w-7xl mx-auto fade-in">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-bold" style="color: var(--text-ink);">
+        {% if lang == "ar" %}📚 قاعدة المعرفة{% else %}📚 Knowledge Base{% endif %}
+      </h1>
+      <p class="text-sm mt-1" style="color: var(--text-muted);">
+        {{ total_articles }} {% if lang == "ar" %}مقالة منشورة{% else %}published articles{% endif %}
+      </p>
+    </div>
+    {% if can_edit %}
+    <a href="/kb/new?audience={{ audience|default('internal') }}"
+       class="btn-primary">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+      </svg>
+      {% if lang == "ar" %}مقالة جديدة{% else %}New Article{% endif %}
+    </a>
+    {% endif %}
+  </div>
+
+  {% if can_edit %}
+  <div class="mb-4 flex items-center gap-2">
+    <a href="/kb?audience=internal" class="btn-secondary {% if audience == 'internal' %}bg-primary/10 text-primary{% endif %}">
+      {{ t('kb.internal_base', lang=lang) }} ({{ internal_total }})
+    </a>
+    <a href="/kb?audience=portal" class="btn-secondary {% if audience == 'portal' %}bg-primary/10 text-primary{% endif %}">
+      {{ t('kb.portal_base', lang=lang) }} ({{ portal_total }})
+    </a>
+  </div>
+  {% endif %}
+
+  <!-- Search bar -->
+  <div class="relative mb-6" x-data="{ focused: false }">
+    <div class="relative">
+      <svg class="absolute {% if dir == 'rtl' %}right-3{% else %}left-3{% endif %} top-1/2 -translate-y-1/2 w-5 h-5" style="color: var(--text-faint);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+      </svg>
+      <input type="text"
+             id="kb-search"
+             value="{{ search_query }}"
+             placeholder="{% if lang == 'ar' %}ابحث في قاعدة المعرفة...{% else %}Search knowledge base...{% endif %}"
+             class="form-input {% if dir == 'rtl' %}pr-10{% else %}pl-10{% endif %} py-3 text-base"
+             hx-get="/api/kb/search-html"
+             hx-trigger="keyup changed delay:300ms"
+             hx-target="#search-results"
+             hx-include="[id='kb-search']"
+             hx-vals='{"audience":"{{ audience|default("internal") }}"}'
+             name="q"
+             @focus="focused = true"
+             @blur="setTimeout(() => focused = false, 200)"
+             autocomplete="off">
+    </div>
+    <!-- Live search dropdown -->
+    <div id="search-results"
+         class="absolute z-20 w-full mt-1 rounded-xl shadow-lg" style="background: var(--bg-card); border: 1px solid var(--border-color);"
+         x-show="focused && document.getElementById('kb-search').value.length > 1"
+         x-cloak>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+
+    <!-- Sidebar: Categories -->
+    <aside class="lg:col-span-1">
+      <div class="card p-4">
+        <h2 class="text-sm font-semibold uppercase tracking-wide mb-3" style="color: var(--text-muted);">
+          {% if lang == "ar" %}التصنيفات{% else %}Categories{% endif %}
+        </h2>
+        <nav class="space-y-1">
+          <a href="/kb?audience={{ audience|default('internal') }}"
+             class="flex items-center justify-between px-3 py-2 rounded-lg text-sm transition
+                    {% if not selected_category %}bg-primary/10 text-primary font-semibold{% else %}hover:bg-gray-50 dark:hover:bg-gray-800{% endif %}"
+             {% if selected_category %}style="color: var(--text-muted);"{% endif %}>
+            <span>{% if lang == "ar" %}الكل{% else %}All{% endif %}</span>
+            <span class="text-xs rounded-full px-2 py-0.5" style="background: var(--bg-surface); color: var(--text-muted);">{{ total_articles }}</span>
+          </a>
+          {% for cat in categories %}
+          <a href="/kb?audience={{ audience|default('internal') }}&category_id={{ cat.id }}"
+             class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition
+                    {% if selected_category == cat.id|string %}bg-primary/10 text-primary font-semibold{% else %}hover:bg-gray-50 dark:hover:bg-gray-800{% endif %}"
+             {% if selected_category != cat.id|string %}style="color: var(--text-muted);"{% endif %}>
+            <span>{% if lang == "ar" %}{{ cat.name_ar }}{% else %}{{ cat.name_en }}{% endif %}</span>
+          </a>
+          {% endfor %}
+        </nav>
+      </div>
+    </aside>
+
+    <!-- Articles grid -->
+    <main class="lg:col-span-3">
+      {% if articles %}
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {% for article in articles %}
+        <a href="{% if can_edit %}/kb/{{ article.id }}{% elif audience == 'portal' %}/portal/kb/{{ article.id }}{% else %}/kb/{{ article.id }}{% endif %}"
+           class="card p-5 hover:shadow-md transition-shadow duration-200 group block">
+          <h3 class="font-semibold group-hover:text-primary transition-colors mb-2 line-clamp-2" style="color: var(--text-ink);">
+            {% if lang == "ar" %}{{ article.title_ar }}{% else %}{{ article.title_en }}{% endif %}
+          </h3>
+          <p class="text-sm line-clamp-3 mb-4" style="color: var(--text-muted);">
+            {% if lang == "ar" %}{{ article.content_ar[:150] }}{% else %}{{ article.content_en[:150] }}{% endif %}...
+          </p>
+          <div class="flex items-center gap-4 text-xs" style="color: var(--text-faint);">
+            <span class="flex items-center gap-1">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+              </svg>
+              {{ article.view_count or 0 }}
+            </span>
+            <span class="flex items-center gap-1">
+              <svg class="w-3.5 h-3.5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M2 10.5a1.5 1.5 0 113 0v6a1.5 1.5 0 01-3 0v-6zM6 10.333v5.43a2 2 0 001.106 1.79l.05.025A4 4 0 008.943 18h5.416a2 2 0 001.962-1.608l1.2-6A2 2 0 0015.56 8H12V4a2 2 0 00-2-2 1 1 0 00-1 1v.667a4 4 0 01-.8 2.4L6.8 7.933a4 4 0 00-.8 2.4z"/>
+              </svg>
+              {{ article.helpful_count or 0 }}
+            </span>
+            {% if article.attachment_storage_key %}
+            <span class="flex items-center gap-1">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13"/>
+              </svg>
+              {{ t('kb.has_attachment', lang=lang) }}
+            </span>
+            {% endif %}
+          </div>
+        </a>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="card p-12 text-center">
+        <svg class="w-16 h-16 mx-auto mb-4" style="color: var(--text-faint);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        <p class="font-medium" style="color: var(--text-muted);">
+          {% if search_query %}
+            {% if lang == "ar" %}لا توجد نتائج لـ "{{ search_query }}"{% else %}No results for "{{ search_query }}"{% endif %}
+          {% else %}
+            {% if lang == "ar" %}لا توجد مقالات منشورة بعد{% else %}No articles published yet{% endif %}
+          {% endif %}
+        </p>
+        {% if can_edit %}
+        <a href="/kb/new?audience={{ audience|default('internal') }}" class="btn-primary mt-4 inline-flex">
+          {% if lang == "ar" %}أضف أول مقالة{% else %}Add first article{% endif %}
+        </a>
+        {% endif %}
+      </div>
+      {% endif %}
+    </main>
+
+  </div>
+</div>
+{% endblock %}

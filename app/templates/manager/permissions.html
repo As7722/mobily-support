@@ -1,0 +1,137 @@
+{% extends "base_app.html" %}
+{% block title %}{{ lang == 'ar' and 'إدارة الصلاحيات' or 'Permissions Management' }} — موبايلي{% endblock %}
+{% block page_title %}{{ lang == 'ar' and 'إدارة الصلاحيات' or 'Permissions Management' }}{% endblock %}
+
+{% block content %}
+<div class="p-6 space-y-6 fade-in" x-data="permManager()" x-init="init()">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between">
+    <div>
+      <h2 class="text-lg font-bold" style="color:var(--text-ink);">
+        {{ lang == 'ar' and 'مصفوفة الصلاحيات' or 'Permission Matrix' }}
+      </h2>
+      <p class="text-xs mt-0.5" style="color:var(--text-faint);">
+        {{ lang == 'ar' and 'إدارة صلاحيات الأدوار — التغييرات تُطبَّق فورياً' or 'Manage role permissions — changes apply immediately' }}
+      </p>
+    </div>
+  </div>
+
+  <!-- Info banner -->
+  <div class="rounded-xl border px-4 py-3 flex items-start gap-3" style="border-color: rgba(0,174,239,0.3); background: rgba(0,174,239,0.06);">
+    <svg class="h-5 w-5 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color:#00AEEF;">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/>
+    </svg>
+    <div>
+      <p class="text-xs font-bold" style="color: var(--text-ink);">
+        {{ lang == 'ar' and 'كيف تعمل الصلاحيات:' or 'How permissions work:' }}
+      </p>
+      <ul class="text-xs mt-1 space-y-0.5" style="color: var(--text-muted);">
+        <li>{{ lang == 'ar' and '• الأدمن لديه جميع الصلاحيات تلقائياً (لا يمكن تقييده)' or '• Admin has all permissions automatically (cannot be restricted)' }}</li>
+        <li>{{ lang == 'ar' and '• تفعيل/تعطيل الصلاحية يُطبَّق فوراً على جميع المستخدمين بنفس الدور' or '• Toggling a permission applies immediately to all users with that role' }}</li>
+        <li>{{ lang == 'ar' and '• "إعادة تعيين" تُرجع صلاحيات الدور للإعدادات الافتراضية' or '• "Reset" restores a role to default permissions' }}</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Reset buttons per role -->
+  <div class="flex flex-wrap gap-2">
+    {% for role in roles %}
+    {% if role != 'admin' %}
+    <button hx-post="/api/manager/permissions/reset"
+            hx-vals='{"role":"{{ role }}"}'
+            hx-confirm="{{ lang == 'ar' and 'هل تريد إعادة تعيين صلاحيات' or 'Reset permissions for' }} {{ role }}?"
+            hx-on::after-request="if(event.detail.successful) location.reload()"
+            class="btn-secondary btn-sm" style="display:inline-flex;align-items:center;gap:4px;">
+      <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/>
+      </svg>
+      {{ lang == 'ar' and 'إعادة تعيين' or 'Reset' }} {{ role }}
+    </button>
+    {% endif %}
+    {% endfor %}
+  </div>
+
+  <!-- Permissions Matrix -->
+  <template x-for="(group, gid) in groups" :key="gid">
+    <div class="card overflow-hidden">
+      <!-- Group Header -->
+      <div class="px-5 py-3 border-b" style="border-color: var(--border-color); background: var(--bg-surface);">
+        <h3 class="text-sm font-bold flex items-center gap-2" style="color: var(--text-ink);">
+          <span style="width:8px;height:8px;border-radius:50%;background:#00AEEF;flex-shrink:0;"></span>
+          <span x-text="group.label_{{ lang }}"></span>
+        </h3>
+      </div>
+
+      <!-- Table -->
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr style="border-bottom: 1px solid var(--border-color);">
+              <th class="px-5 py-3 text-start text-[10px] font-bold uppercase tracking-wide" style="color: var(--text-faint); min-width: 220px;">
+                {{ lang == 'ar' and 'الصلاحية' or 'Permission' }}
+              </th>
+              {% for role in roles %}
+              <th class="px-4 py-3 text-center text-[10px] font-bold uppercase tracking-wide" style="color: var(--text-faint); min-width: 100px;">
+                <div class="flex flex-col items-center gap-1">
+                  <span class="text-xs px-2 py-0.5 rounded-full font-semibold
+                    {% if role == 'admin' %}bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400
+                    {% elif role == 'manager' %}bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400
+                    {% elif role == 'supervisor' %}bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400
+                    {% else %}bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400{% endif %}">
+                    {{ role }}
+                  </span>
+                </div>
+              </th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="perm in group.perms" :key="perm.key">
+              <tr style="border-bottom: 1px solid var(--border-color);" class="hover:bg-[var(--bg-surface)] transition-colors">
+                <td class="px-5 py-3">
+                  <div>
+                    <p class="text-xs font-semibold" style="color: var(--text-ink);" x-text="perm.label_{{ lang }}"></p>
+                    <p class="text-[10px] font-mono mt-0.5" style="color: var(--text-faint);" x-text="perm.key"></p>
+                  </div>
+                </td>
+                {% for role in roles %}
+                <td class="px-4 py-3 text-center">
+                  {% if role == 'admin' %}
+                  <span class="inline-flex items-center justify-center h-5 w-5 rounded" style="background: rgba(16,185,129,0.15);">
+                    <svg class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4.5 12.75l6 6 9-13.5"/>
+                    </svg>
+                  </span>
+                  {% else %}
+                  <input type="checkbox"
+                         :checked="perm.roles['{{ role }}']"
+                         hx-post="/api/manager/permissions/toggle"
+                         :hx-vals="JSON.stringify({permission: perm.key, role: '{{ role }}'})"
+                         hx-target="closest td"
+                         hx-swap="innerHTML"
+                         class="h-4 w-4 rounded cursor-pointer"
+                         style="accent-color: #00AEEF;">
+                  {% endif %}
+                </td>
+                {% endfor %}
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </template>
+
+</div>
+
+<script>
+window._permGroups = {{ groups_json | safe }};
+function permManager() {
+  return {
+    groups: {},
+    init() { this.groups = window._permGroups || {}; }
+  };
+}
+</script>
+{% endblock %}

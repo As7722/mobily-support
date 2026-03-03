@@ -1,0 +1,327 @@
+{% extends "base_app.html" %}
+{% block title %}{{ t('profile.title', lang=lang) }} — موبايلي{% endblock %}
+{% block page_title %}{{ t('profile.title', lang=lang) }}{% endblock %}
+
+{# ── Role Display Map (NO more raw strings) ─────────────────────────── #}
+{% set role_label = {
+  'admin':      'مدير النظام'       if lang == 'ar' else 'System Administrator',
+  'manager':    'مدير'              if lang == 'ar' else 'Manager',
+  'supervisor': 'مشرف'             if lang == 'ar' else 'Supervisor',
+  'employee':   'موظف دعم تقني'   if lang == 'ar' else 'Support Agent'
+}.get(user_obj.role, user_obj.role) %}
+
+{% set uname = user_obj.full_name_ar if lang == 'ar' else (user_obj.full_name_en or user_obj.full_name_ar) %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-5 py-6 space-y-5">
+
+  <!-- ════ PROFILE HERO ═══════════════════════════════════════════════ -->
+  {%- set rc = {'admin':'#8B5CF6','manager':'#F59E0B','supervisor':'#10B981'}.get(user_obj.role,'#00AEEF') -%}
+  <div style="border-radius:16px;overflow:hidden;border:1px solid rgba(255,255,255,0.07);
+              background:#0d1829;box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+
+    <!-- Cover strip -->
+    <div style="height:90px;background:linear-gradient(135deg,#0b1f3a 0%,#0f2d4a 50%,{{ rc }}22 100%);
+                position:relative;">
+      <!-- subtle grid pattern -->
+      <div style="position:absolute;inset:0;opacity:0.04;
+                  background-image:repeating-linear-gradient(0deg,#fff 0,#fff 1px,transparent 1px,transparent 28px),
+                                   repeating-linear-gradient(90deg,#fff 0,#fff 1px,transparent 1px,transparent 28px);"></div>
+      <!-- role accent line -->
+      <div style="position:absolute;bottom:0;inset-inline-start:0;inset-inline-end:0;height:2px;
+                  background:linear-gradient(90deg,transparent,{{ rc }},transparent);opacity:0.6;"></div>
+    </div>
+
+    <!-- Info row -->
+    <div style="padding:0 28px 24px;display:flex;align-items:flex-end;justify-content:space-between;
+                gap:20px;flex-wrap:wrap;">
+
+      <!-- Left: avatar + details -->
+      <div style="display:flex;align-items:flex-end;gap:18px;margin-top:-36px;">
+
+        <!-- Avatar -->
+        <div style="position:relative;flex-shrink:0;">
+          <div style="width:72px;height:72px;border-radius:18px;
+                      background:linear-gradient(145deg,{{ rc }},{{ rc }}99);
+                      display:flex;align-items:center;justify-content:center;
+                      font-size:26px;font-weight:900;color:#fff;
+                      border:3px solid #0d1829;
+                      box-shadow:0 4px 20px {{ rc }}55;">
+            {{ (user_obj.full_name_ar or 'U')[0] | upper }}
+          </div>
+          <!-- online dot -->
+          <span style="position:absolute;bottom:4px;inset-inline-end:4px;width:11px;height:11px;
+                       border-radius:50%;background:#10B981;border:2px solid #0d1829;"></span>
+        </div>
+
+        <!-- Name + meta -->
+        <div style="padding-bottom:2px;">
+          <h1 style="font-size:20px;font-weight:900;color:#f1f5f9;letter-spacing:-0.02em;line-height:1.2;margin-bottom:6px;">
+            {{ uname }}
+          </h1>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <!-- Role badge -->
+            <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;
+                         border-radius:20px;font-size:11px;font-weight:700;
+                         background:{{ rc }}1a;color:{{ rc }};border:1px solid {{ rc }}33;">
+              <svg style="width:11px;height:11px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                      d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/>
+              </svg>
+              {{ role_label }}
+            </span>
+            {% if user_obj.employee_id %}
+            <span style="font-size:11px;font-weight:600;color:rgba(255,255,255,0.35);
+                         padding:3px 8px;border-radius:6px;background:rgba(255,255,255,0.05);
+                         border:1px solid rgba(255,255,255,0.08);">
+              # {{ user_obj.employee_id }}
+            </span>
+            {% endif %}
+          </div>
+          <!-- Contact info -->
+          <div style="display:flex;align-items:center;gap:14px;margin-top:8px;flex-wrap:wrap;">
+            {% if user_obj.email %}
+            <span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:rgba(255,255,255,0.4);">
+              <svg style="width:12px;height:12px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/>
+              </svg>
+              {{ user_obj.email }}
+            </span>
+            {% endif %}
+            {% if user_obj.phone %}
+            <span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:rgba(255,255,255,0.4);">
+              <svg style="width:12px;height:12px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"/>
+              </svg>
+              {{ user_obj.phone }}
+            </span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: action buttons -->
+      <div style="display:flex;gap:8px;align-items:center;padding-bottom:2px;">
+        <button onclick="document.getElementById('edit-modal').classList.remove('hidden')"
+                style="display:inline-flex;align-items:center;gap:7px;padding:9px 16px;
+                       border-radius:10px;border:1px solid rgba(255,255,255,0.1);
+                       background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.8);
+                       font-size:12px;font-weight:700;cursor:pointer;transition:all 0.15s;"
+                onmouseover="this.style.background='rgba(255,255,255,0.1)'"
+                onmouseout="this.style.background='rgba(255,255,255,0.06)'">
+          <svg style="width:14px;height:14px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z"/>
+          </svg>
+          {{ t('profile.edit', lang=lang) }}
+        </button>
+        <a href="/profile/password"
+           style="display:inline-flex;align-items:center;gap:7px;padding:9px 16px;
+                  border-radius:10px;border:1px solid rgba(0,174,239,0.3);
+                  background:rgba(0,174,239,0.08);color:#00AEEF;
+                  font-size:12px;font-weight:700;text-decoration:none;transition:all 0.15s;"
+           onmouseover="this.style.background='rgba(0,174,239,0.15)'"
+           onmouseout="this.style.background='rgba(0,174,239,0.08)'">
+          <svg style="width:14px;height:14px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/>
+          </svg>
+          {{ t('profile.change_password', lang=lang) }}
+        </a>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════
+       KPI BENTO GRID — Big numbers, clear labels
+  ════════════════════════════════════════════════════════════════ -->
+
+  <!-- ════════════════════════════════════════════════════════════════
+       LEADERBOARD RANK
+  ════════════════════════════════════════════════════════════════ -->
+  {% if leaderboard_rank %}
+  <div class="bento relative overflow-hidden">
+    <div class="flex items-center gap-5">
+      <div class="flex-shrink-0 text-5xl font-black"
+           style="color: #00AEEF;">#{{ leaderboard_rank }}</div>
+      <div class="flex-1">
+        <p class="text-base font-bold" style="color: var(--text-ink);">{{ t('gamification.leaderboard_rank', lang=lang) }}</p>
+        <p class="text-sm mt-0.5" style="color: var(--text-muted);">{{ t('gamification.rank_subtitle', lang=lang) }}</p>
+      </div>
+      <div class="text-5xl ms-auto shrink-0">
+        {% if leaderboard_rank == 1 %}🥇{% elif leaderboard_rank == 2 %}🥈{% elif leaderboard_rank == 3 %}🥉{% endif %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ════════════════════════════════════════════════════════════════
+       BADGES
+  ════════════════════════════════════════════════════════════════ -->
+  <div class="bento">
+    <h2 class="text-sm font-bold uppercase tracking-wider mb-4 flex items-center gap-2"
+        style="color: var(--text-muted);">
+      <svg class="h-4 w-4 text-amber-500" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M11.645 20.91l-.007-.003-.022-.012a15.247 15.247 0 01-.383-.218 25.18 25.18 0 01-4.244-3.17C4.688 15.36 2.25 12.174 2.25 8.25 2.25 5.322 4.714 3 7.688 3A5.5 5.5 0 0112 5.052 5.5 5.5 0 0116.313 3c2.973 0 5.437 2.322 5.437 5.25 0 3.925-2.438 7.111-4.739 9.256a25.175 25.175 0 01-4.244 3.17 15.247 15.247 0 01-.383.219l-.022.012-.007.004-.003.001a.752.752 0 01-.704 0l-.003-.001z"/>
+      </svg>
+      {{ t('gamification.my_badges', lang=lang) }}
+    </h2>
+    {% if badges %}
+    <div class="flex flex-wrap gap-3">
+      {% for ub in badges %}
+      <div class="flex flex-col items-center gap-2 rounded-2xl p-4 text-center transition-all duration-200 hover:-translate-y-1 cursor-default"
+           style="border: 1px solid var(--border-color); background: var(--bg-surface); min-width: 80px;"
+           title="{{ ub.badge.description_ar if lang == 'ar' else (ub.badge.description_en or '') }}">
+        <span class="text-2xl">{{ ub.badge.icon or '🏅' }}</span>
+        <p class="text-[10px] font-semibold leading-tight line-clamp-2" style="color: var(--text-muted);">
+          {{ ub.badge.name_ar if lang == 'ar' else (ub.badge.name_en or ub.badge.name_ar) }}
+        </p>
+        {% if ub.awarded_count and ub.awarded_count > 1 %}
+        <span class="rounded-full px-1.5 py-0.5 text-[9px] font-black" style="background: rgba(0,174,239,0.12); color: #00AEEF;">×{{ ub.awarded_count }}</span>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="flex flex-col items-center py-8 text-center">
+      <div class="h-14 w-14 rounded-2xl flex items-center justify-center mb-3" style="background: var(--bg-surface);">
+        <svg class="h-7 w-7" style="color: var(--text-faint);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11.645 20.91l-.007-.003-.022-.012a15.247 15.247 0 01-.383-.218 25.18 25.18 0 01-4.244-3.17C4.688 15.36 2.25 12.174 2.25 8.25 2.25 5.322 4.714 3 7.688 3A5.5 5.5 0 0112 5.052 5.5 5.5 0 0116.313 3c2.973 0 5.437 2.322 5.437 5.25 0 3.925-2.438 7.111-4.739 9.256a25.175 25.175 0 01-4.244 3.17 15.247 15.247 0 01-.383.219l-.022.012-.007.004-.003.001a.752.752 0 01-.704 0l-.003-.001z"/>
+        </svg>
+      </div>
+      <p class="text-sm" style="color: var(--text-muted);">{{ t('gamification.no_badges', lang=lang) }}</p>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════
+       NOTIFICATION PREFERENCES + 2FA
+  ════════════════════════════════════════════════════════════════ -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+    <!-- Notifications -->
+    <div class="bento" x-data="{ saving: false }">
+      <h2 class="text-sm font-bold uppercase tracking-wider mb-4 flex items-center gap-2"
+          style="color: var(--text-muted);">
+        <svg class="h-4 w-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/>
+        </svg>
+        {{ t('profile.notifications', lang=lang) }}
+      </h2>
+      <form hx-post="/api/profile/notifications" hx-swap="none"
+            @htmx:after-request="saving = false"
+            @submit="saving = true"
+            class="space-y-3">
+        {% for label_key, field, checked in [
+          ('notif.ticket_assigned', 'email_on_assign', user_obj.notify_email_assign if user_obj.notify_email_assign is defined else True),
+          ('notif.sla_warning', 'sms_on_sla', user_obj.notify_sms_sla if user_obj.notify_sms_sla is defined else True),
+          ('notif.daily_summary', 'email_daily', user_obj.notify_email_daily if user_obj.notify_email_daily is defined else False),
+        ] %}
+        <label class="flex items-center gap-3 cursor-pointer group">
+          <div class="relative h-5 w-5 shrink-0">
+            <input type="checkbox" name="{{ field }}" {% if checked %}checked{% endif %}
+                   class="h-5 w-5 rounded-md cursor-pointer accent-cyan-500"
+                   style="border-color: var(--border-color);">
+          </div>
+          <span class="text-sm font-medium" style="color: var(--text-muted);">{{ t(label_key, lang=lang) }}</span>
+        </label>
+        {% endfor %}
+        <button type="submit" class="btn-cyan btn-sm mt-2" :class="saving ? 'opacity-70' : ''">
+          <span x-show="!saving">{{ t('app.save', lang=lang) }}</span>
+          <span x-show="saving">{{ t('app.saving', lang=lang) }}</span>
+        </button>
+      </form>
+    </div>
+
+    <!-- 2FA Security -->
+    <div class="bento">
+      <h2 class="text-sm font-bold uppercase tracking-wider mb-4 flex items-center gap-2"
+          style="color: var(--text-muted);">
+        <svg class="h-4 w-4 text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/>
+        </svg>
+        {{ t('profile.2fa_title', lang=lang) }}
+      </h2>
+      <p class="text-sm mb-4" style="color: var(--text-muted);">{{ t('profile.2fa_desc', lang=lang) }}</p>
+      {% if user_obj.totp_enabled %}
+      <div class="flex items-center gap-2 rounded-xl p-3 bg-emerald-50 border border-emerald-200 dark:bg-emerald-950 dark:border-emerald-800">
+        <svg class="h-5 w-5 text-emerald-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <span class="text-sm font-semibold text-emerald-600 dark:text-emerald-400">{{ t('profile.2fa_enabled', lang=lang) }}</span>
+      </div>
+      {% else %}
+      <a href="/profile/2fa/setup" class="btn-secondary w-full justify-center">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M12 4.5v15m7.5-7.5h-15"/>
+        </svg>
+        {{ t('profile.2fa_enable', lang=lang) }}
+      </a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════
+     EDIT PROFILE MODAL
+════════════════════════════════════════════════════════════════ -->
+<div id="edit-modal"
+     class="fixed inset-0 z-50 flex items-center justify-center p-4"
+     style="background: rgba(0,0,0,0.55); backdrop-filter: blur(8px); display: none;"
+     onclick="if(event.target===this) this.style.display='none'">
+  <div class="w-full max-w-md rounded-2xl p-6 scale-in"
+       style="background: var(--bg-card); border: 1px solid var(--border-color); box-shadow: var(--shadow-up);"
+       onclick="event.stopPropagation()">
+    <div class="flex items-center justify-between mb-5">
+      <h3 class="text-base font-bold" style="color: var(--text-ink);">{{ t('profile.edit', lang=lang) }}</h3>
+      <button onclick="document.getElementById('edit-modal').style.display='none'"
+              class="flex h-8 w-8 items-center justify-center rounded-lg transition-colors"
+              style="color: var(--text-muted);">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    <form hx-post="/api/profile/update"
+          hx-target="#profile-edit-result"
+          hx-swap="innerHTML"
+          hx-on::after-request="if(event.detail.successful){ document.getElementById('edit-modal').style.display='none'; setTimeout(()=>location.reload(),300); }"
+          class="space-y-4">
+      <div id="profile-edit-result"></div>
+      <div>
+        <label class="form-label">{{ t('user.full_name_ar', lang=lang) }} *</label>
+        <input type="text" name="full_name_ar" value="{{ user_obj.full_name_ar or '' }}"
+               class="form-input" required dir="rtl">
+      </div>
+      <div>
+        <label class="form-label">{{ t('user.full_name_en', lang=lang) }}</label>
+        <input type="text" name="full_name_en" value="{{ user_obj.full_name_en or '' }}"
+               class="form-input" dir="ltr">
+      </div>
+      <div>
+        <label class="form-label">{{ t('user.phone', lang=lang) }}</label>
+        <input type="tel" name="phone" value="{{ user_obj.phone or '' }}"
+               class="form-input" dir="ltr" placeholder="05XXXXXXXX">
+      </div>
+      <div class="flex gap-3 pt-1">
+        <button type="submit" class="btn-cyan flex-1 justify-center">{{ t('app.save', lang=lang) }}</button>
+        <button type="button" onclick="document.getElementById('edit-modal').style.display='none'"
+                class="btn-secondary">{{ t('app.cancel', lang=lang) }}</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  // Show edit modal properly
+  document.querySelector('button[onclick*="edit-modal"]')?.addEventListener('click', () => {
+    document.getElementById('edit-modal').style.display = 'flex';
+  });
+</script>
+{% endblock %}

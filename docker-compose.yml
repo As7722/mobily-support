@@ -1,0 +1,258 @@
+# ══════════════════════════════════════════════════════════════════════════════
+#  Mobily Technical Support — Docker Compose
+#  Core services (no profile needed): web, db, redis, celery_worker, celery_beat
+#  Optional profiles:
+#    --profile prod       → adds nginx reverse proxy
+#    --profile ssl        → adds certbot for Let's Encrypt renewal
+#    --profile clamav     → adds ClamAV virus scanner
+#    --profile monitoring → adds Flower (Celery UI)
+#    --profile dev        → adds Adminer (DB GUI)
+# ══════════════════════════════════════════════════════════════════════════════
+
+x-common-env: &common-env
+  env_file: .env
+  environment:
+    PYTHONUNBUFFERED: "1"
+    PYTHONDONTWRITEBYTECODE: "1"
+
+x-app-base: &app-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  volumes:
+    - .:/app
+    - uploads_data:/app/uploads
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  networks: [mobily_net]
+  restart: unless-stopped
+  <<: *common-env
+
+services:
+
+  # ── FastAPI Web Application ─────────────────────────────────────────────────
+  web:
+    <<: *app-base
+    container_name: mobily_web
+    command: >
+      uvicorn app.main:app
+        --host 0.0.0.0
+        --port 8000
+        --reload
+        --reload-delay 1
+        --timeout-graceful-shutdown 3
+        --log-level info
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── PostgreSQL 16 ───────────────────────────────────────────────────────────
+  db:
+    image: postgres:16.4-alpine
+    container_name: mobily_db
+    environment:
+      POSTGRES_DB:          ${POSTGRES_DB:-mobily_support}
+      POSTGRES_USER:        ${POSTGRES_USER:-mobily}
+      POSTGRES_PASSWORD:    ${POSTGRES_PASSWORD:-mobily_dev_password}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_extensions.sql:/docker-entrypoint-initdb.d/10_init_extensions.sql:ro
+      - ./scripts/backup:/backups
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mobily} -d ${POSTGRES_DB:-mobily_support}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    shm_size: 128m
+    restart: unless-stopped
+    networks: [mobily_net]
+
+  # ── Redis 7.2 ───────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: mobily_redis
+    command: >
+      redis-server
+        --requirepass ${REDIS_PASSWORD:-redis_dev_password}
+        --appendonly yes
+        --appendfsync everysec
+        --maxmemory 256mb
+        --maxmemory-policy allkeys-lru
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_dev_password}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks: [mobily_net]
+
+  # ── Celery Worker ───────────────────────────────────────────────────────────
+  celery_worker:
+    <<: *app-base
+    container_name: mobily_celery_worker
+    command: >
+      celery -A app.worker.celery_app worker
+        --loglevel=info
+        --concurrency=2
+        --queues=default,sla,notifications,reports
+        --max-tasks-per-child=500
+        --prefetch-multiplier=1
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.worker.celery_app inspect ping --timeout=5 || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+
+  # ── Celery Beat ─────────────────────────────────────────────────────────────
+  celery_beat:
+    <<: *app-base
+    container_name: mobily_celery_beat
+    command: >
+      celery -A app.worker.celery_app beat
+        --loglevel=info
+        --scheduler celery.beat:PersistentScheduler
+        --schedule=/app/celerybeat-data/celerybeat-schedule
+        --pidfile=
+    volumes:
+      - .:/app
+      - uploads_data:/app/uploads
+      - celery_beat_data:/app/celerybeat-data
+    networks: [mobily_net]
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.worker.celery_app inspect ping --destination=celery@$$HOSTNAME 2>/dev/null || exit 0"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ── Nginx (profile: prod) — needs SSL certs ─────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: mobily_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/proxy_params:/etc/nginx/proxy_params:ro
+      - ./app/static:/app/app/static:ro
+      - certbot_www:/var/www/certbot:ro
+      - certbot_conf:/etc/letsencrypt:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks: [mobily_net]
+    profiles: [prod]
+
+  # ── Certbot — SSL certificate renewal (profile: ssl) ───────────────────────
+  certbot:
+    image: certbot/certbot:latest
+    container_name: mobily_certbot
+    volumes:
+      - certbot_www:/var/www/certbot
+      - certbot_conf:/etc/letsencrypt
+    entrypoint: /bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done'
+    networks: [mobily_net]
+    profiles: [ssl]
+
+  # ── ClamAV (profile: clamav) ────────────────────────────────────────────────
+  clamav:
+    image: clamav/clamav:stable
+    container_name: mobily_clamav
+    expose: ["3310"]
+    volumes:
+      - clamav_data:/var/lib/clamav
+    environment:
+      CLAMAV_NO_FRESHCLAMD: "false"
+      CLAMAV_NO_CLAMD:      "false"
+      CLAMAV_NO_MILTERD:    "true"
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 60s
+      timeout: 20s
+      retries: 5
+      start_period: 120s
+    restart: unless-stopped
+    networks: [mobily_net]
+    profiles: [clamav]
+
+  # ── Flower — Celery task monitor (profile: monitoring) ─────────────────────
+  flower:
+    <<: *app-base
+    container_name: mobily_flower
+    command: >
+      celery -A app.worker.celery_app flower
+        --port=5555
+        --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-flowerpass}
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+      - celery_worker
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5555/healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    profiles: [monitoring]
+
+  # ── Adminer — DB GUI (profile: dev) ────────────────────────────────────────
+  adminer:
+    image: adminer:latest
+    container_name: mobily_adminer
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [mobily_net]
+    profiles: [dev]
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  celery_beat_data:
+    driver: local
+  uploads_data:
+    driver: local
+  clamav_data:
+    driver: local
+  certbot_www:
+    driver: local
+  certbot_conf:
+    driver: local
+  nginx_logs:
+    driver: local
+
+networks:
+  mobily_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

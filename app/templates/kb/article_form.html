@@ -1,0 +1,122 @@
+{% extends "base_app.html" %}
+
+{% block title %}{% if article %}{% if lang == "ar" %}تعديل مقالة{% else %}Edit Article{% endif %}{% else %}{% if lang == "ar" %}مقالة جديدة{% else %}New Article{% endif %}{% endif %}{% endblock %}
+
+{% block page_title %}{% if article %}{% if lang == "ar" %}تعديل مقالة{% else %}Edit Article{% endif %}{% else %}{% if lang == "ar" %}مقالة جديدة{% else %}New Article{% endif %}{% endif %}{% endblock %}
+
+{% block content %}
+<div class="p-6 max-w-3xl mx-auto fade-in">
+  <div class="flex items-center gap-3 mb-6">
+    <a href="/kb?audience={{ audience|default('internal') }}" class="hover:text-gray-600 dark:hover:text-gray-200 transition" style="color: var(--text-faint);">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="{% if dir == 'rtl' %}M9 5l7 7-7 7{% else %}M15 19l-7-7 7-7{% endif %}"/>
+      </svg>
+    </a>
+    <h1 class="text-xl font-bold" style="color: var(--text-ink);">
+      {% if article %}
+        {% if lang == "ar" %}تعديل مقالة{% else %}Edit Article{% endif %}
+      {% else %}
+        {% if lang == "ar" %}مقالة جديدة{% else %}New Article{% endif %}
+      {% endif %}
+    </h1>
+  </div>
+
+  <div class="card p-6"
+       x-data="{ publishing: false, saving: false }">
+    <form {% if article %}hx-put="/api/kb/articles/{{ article.id }}"{% else %}hx-post="/api/kb/articles"{% endif %}
+          hx-encoding="multipart/form-data"
+          hx-target="#form-msg"
+          hx-on::after-request="if(event.detail.successful) setTimeout(() => window.location='/kb?audience=' + document.querySelector('select[name=audience]').value, 1000)">
+
+      <div id="form-msg" class="mb-4"></div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div>
+          <label class="form-label">{% if lang == "ar" %}العنوان بالعربي{% else %}Title (Arabic){% endif %} *</label>
+          <input name="title_ar" type="text" class="form-input" required
+                 value="{{ article.title_ar if article else '' }}"
+                 placeholder="{% if lang == 'ar' %}العنوان بالعربي{% else %}Arabic title{% endif %}">
+        </div>
+        <div>
+          <label class="form-label">{% if lang == "ar" %}العنوان بالإنجليزي{% else %}Title (English){% endif %} *</label>
+          <input name="title_en" type="text" class="form-input" required
+                 value="{{ article.title_en if article else '' }}"
+                 placeholder="{% if lang == 'ar' %}العنوان بالإنجليزي{% else %}English title{% endif %}">
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div>
+          <label class="form-label">{% if lang == "ar" %}المحتوى بالعربي{% else %}Content (Arabic){% endif %} *</label>
+          <textarea name="content_ar" rows="10" class="form-input" required
+                    placeholder="{% if lang == 'ar' %}محتوى المقالة بالعربي...{% else %}Article content in Arabic...{% endif %}">{{ article.content_ar if article else '' }}</textarea>
+        </div>
+        <div>
+          <label class="form-label">{% if lang == "ar" %}المحتوى بالإنجليزي{% else %}Content (English){% endif %} *</label>
+          <textarea name="content_en" rows="10" class="form-input" required
+                    placeholder="{% if lang == 'ar' %}محتوى المقالة بالإنجليزي...{% else %}Article content in English...{% endif %}">{{ article.content_en if article else '' }}</textarea>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div>
+          <label class="form-label">{% if lang == "ar" %}التصنيف{% else %}Category{% endif %}</label>
+          <select name="category_id" class="form-input">
+            <option value="">— {% if lang == "ar" %}بدون تصنيف{% else %}No category{% endif %} —</option>
+            {% for cat in categories %}
+            <option value="{{ cat.id }}"
+                    {% if article and article.category_id == cat.id %}selected{% endif %}>
+              {% if lang == "ar" %}{{ cat.name_ar }}{% else %}{{ cat.name_en }}{% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="form-label">{{ t('kb.audience', lang=lang) }}</label>
+          <select name="audience" class="form-input">
+            <option value="internal" {% if audience == 'internal' or (article and article.audience == 'internal') %}selected{% endif %}>
+              {{ t('kb.internal_base', lang=lang) }}
+            </option>
+            <option value="portal" {% if audience == 'portal' or (article and article.audience == 'portal') %}selected{% endif %}>
+              {{ t('kb.portal_base', lang=lang) }}
+            </option>
+          </select>
+        </div>
+      </div>
+
+      <div class="mb-6">
+        <label class="form-label">{{ t('kb.attachment', lang=lang) }}</label>
+        <input name="attachment" type="file" class="form-input" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.jpg,.jpeg,.png">
+        {% if article and article.attachment_storage_key %}
+        <a href="/kb/articles/{{ article.id }}/attachment" class="text-xs mt-2 inline-flex text-primary hover:underline">
+          {{ article.attachment_file_name }}
+        </a>
+        {% endif %}
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div class="flex items-end">
+          <label class="flex items-center gap-3 cursor-pointer">
+            <input type="checkbox" name="is_published" value="true"
+                   {% if article and article.is_published %}checked{% endif %}
+                   class="w-4 h-4 rounded text-primary">
+            <span class="text-sm font-medium" style="color: var(--text-ink);">
+              {% if lang == "ar" %}نشر المقالة{% else %}Publish article{% endif %}
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3 justify-end">
+        <a href="/kb?audience={{ audience|default('internal') }}" class="btn-secondary">
+          {% if lang == "ar" %}إلغاء{% else %}Cancel{% endif %}
+        </a>
+        <button type="submit" class="btn-primary">
+          {% if lang == "ar" %}حفظ المقالة{% else %}Save Article{% endif %}
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

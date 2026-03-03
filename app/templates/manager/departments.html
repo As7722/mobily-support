@@ -1,0 +1,241 @@
+{% extends "base_app.html" %}
+{% block title %}{{ lang == 'ar' and 'إدارة الأقسام' or 'Department Management' }} — موبايلي{% endblock %}
+{% block page_title %}{{ lang == 'ar' and 'إدارة الأقسام' or 'Department Management' }}{% endblock %}
+
+{% set _lbl = {
+  'title': lang == 'ar' and 'إدارة الأقسام' or 'Department Management',
+  'desc': lang == 'ar' and 'إضافة وتعديل الأقسام وتخصيص حقول رفع التذاكر لكل قسم' or 'Add, edit departments and customize ticket fields per department',
+  'add': lang == 'ar' and 'إضافة قسم' or 'Add Department',
+  'edit': lang == 'ar' and 'تعديل' or 'Edit',
+  'name_ar': lang == 'ar' and 'الاسم (عربي)' or 'Name (AR)',
+  'name_en': lang == 'ar' and 'الاسم (إنجليزي)' or 'Name (EN)',
+  'code': lang == 'ar' and 'الكود' or 'Code',
+  'active': lang == 'ar' and 'نشط' or 'Active',
+  'inactive': lang == 'ar' and 'متوقف' or 'Inactive',
+  'users': lang == 'ar' and 'موظف' or 'agents',
+  'fields': lang == 'ar' and 'حقول البورتل' or 'Portal Fields',
+  'save': lang == 'ar' and 'حفظ' or 'Save',
+  'cancel': lang == 'ar' and 'إلغاء' or 'Cancel',
+  'add_field': lang == 'ar' and 'إضافة حقل' or 'Add Field',
+  'field_key': lang == 'ar' and 'المفتاح' or 'Key',
+  'field_type': lang == 'ar' and 'النوع' or 'Type',
+  'field_label_ar': lang == 'ar' and 'التسمية (عربي)' or 'Label (AR)',
+  'field_label_en': lang == 'ar' and 'التسمية (إنجليزي)' or 'Label (EN)',
+  'field_required': lang == 'ar' and 'إلزامي' or 'Required',
+  'field_options': lang == 'ar' and 'الخيارات' or 'Options',
+  'option_value': lang == 'ar' and 'القيمة' or 'Value',
+  'option_label_ar': lang == 'ar' and 'التسمية عربي' or 'Label AR',
+  'option_label_en': lang == 'ar' and 'التسمية إنجليزي' or 'Label EN',
+  'add_option': lang == 'ar' and 'إضافة خيار' or 'Add Option',
+  'portal_visible': lang == 'ar' and 'يظهر في البورتل' or 'Visible in Portal',
+  'portal_hidden': lang == 'ar' and 'مخفي من البورتل' or 'Hidden from Portal',
+  'info_banner': lang == 'ar' and 'الأقسام النشطة تظهر تلقائياً في البورتل الخارجي. يمكنك إيقاف قسم لإخفائه.' or 'Active departments appear automatically in the external portal. Deactivate to hide.',
+  'delete_field': lang == 'ar' and 'حذف' or 'Delete',
+  'no_fields': lang == 'ar' and 'لا توجد حقول مخصصة — سيظهر القسم بالحقول المشتركة فقط' or 'No custom fields — department will show shared fields only',
+} %}
+
+{% block content %}
+<div class="p-6 space-y-6 fade-in" x-data="deptManager()" x-init="init()">
+
+  <div class="flex items-center justify-between">
+    <div>
+      <h2 class="text-lg font-bold" style="color:var(--text-ink);">{{ _lbl.title }}</h2>
+      <p class="text-xs mt-0.5" style="color:var(--text-faint);">{{ _lbl.desc }}</p>
+    </div>
+    <button @click="openAdd()" class="btn-primary btn-sm" style="display:inline-flex;align-items:center;gap:5px;">
+      <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+      {{ _lbl.add }}
+    </button>
+  </div>
+
+  <div class="rounded-xl border px-4 py-3 flex items-center gap-3" style="border-color: rgba(0,174,239,0.3); background: rgba(0,174,239,0.06);">
+    <svg class="h-5 w-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color:#00AEEF;">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"/>
+    </svg>
+    <p class="text-xs font-medium" style="color: var(--text-ink);">{{ _lbl.info_banner }}</p>
+  </div>
+
+  <!-- Departments Grid -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+    <template x-for="dept in departments" :key="dept.id">
+      <div class="card overflow-hidden" style="transition:box-shadow 0.2s;"
+           @mouseenter="$el.style.boxShadow='0 8px 30px rgba(0,174,239,0.1)'"
+           @mouseleave="$el.style.boxShadow=''">
+        <div style="padding:14px 18px;border-bottom:1px solid var(--border-color);display:flex;align-items:center;gap:10px;">
+          <div style="width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;"
+               :style="dept.is_active ? 'background:rgba(0,174,239,0.1);color:#00AEEF;' : 'background:rgba(100,116,139,0.1);color:#64748B;'">
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21"/></svg>
+          </div>
+          <div class="flex-1 min-w-0">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <h3 class="text-sm font-bold truncate" style="color:var(--text-ink);" x-text="dept.name_{{ lang }}"></h3>
+              <span class="shrink-0" style="padding:1px 8px;border-radius:20px;font-size:10px;font-weight:700;"
+                    :style="dept.is_active ? 'background:rgba(16,185,129,0.1);color:#10B981;' : 'background:rgba(239,68,68,0.1);color:#EF4444;'"
+                    x-text="dept.is_active ? '{{ _lbl.active }}' : '{{ _lbl.inactive }}'"></span>
+            </div>
+            <p class="text-xs" style="color:var(--text-faint);" x-text="dept.code + ' — ' + dept.user_count + ' {{ _lbl.users }}'"></p>
+          </div>
+          <div style="display:flex;gap:3px;">
+            <button @click="openEdit(dept)" class="btn-ghost btn-sm" style="padding:5px;" title="{{ _lbl.edit }}">
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z"/></svg>
+            </button>
+            <button @click="toggleDept(dept)" class="btn-ghost btn-sm" style="padding:5px;">
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" :style="dept.is_active ? 'color:#EF4444;' : 'color:#10B981;'">
+                <path x-show="dept.is_active" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>
+                <path x-show="!dept.is_active" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Portal Fields Editor -->
+        <div style="padding:14px 18px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+            <h4 class="text-xs font-bold uppercase tracking-wide" style="color:var(--text-muted);">{{ _lbl.fields }}</h4>
+            <button @click="addField(dept)" class="btn-secondary btn-sm" style="padding:3px 8px;font-size:10px;">
+              <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+              {{ _lbl.add_field }}
+            </button>
+          </div>
+
+          <div x-show="!dept.portal_fields || dept.portal_fields.length === 0" class="text-center py-4">
+            <p class="text-xs" style="color:var(--text-faint);">{{ _lbl.no_fields }}</p>
+          </div>
+
+          <div class="space-y-2">
+            <template x-for="(field, fi) in (dept.portal_fields || [])" :key="fi">
+              <div class="rounded-lg border p-3 space-y-2" style="border-color:var(--border-color);background:var(--bg-surface);">
+                <div class="grid grid-cols-4 gap-2">
+                  <div>
+                    <label class="text-[9px] font-bold uppercase" style="color:var(--text-faint);">{{ _lbl.field_key }}</label>
+                    <input type="text" x-model="field.key" class="form-input text-xs py-1" dir="ltr" placeholder="problem_type">
+                  </div>
+                  <div>
+                    <label class="text-[9px] font-bold uppercase" style="color:var(--text-faint);">{{ _lbl.field_type }}</label>
+                    <select x-model="field.type" class="form-input text-xs py-1">
+                      <option value="text">Text</option>
+                      <option value="select">Select</option>
+                      <option value="tel">Phone</option>
+                      <option value="number">Number</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="text-[9px] font-bold uppercase" style="color:var(--text-faint);">{{ _lbl.field_label_ar }}</label>
+                    <input type="text" x-model="field.label_ar" class="form-input text-xs py-1" placeholder="نوع المشكلة">
+                  </div>
+                  <div>
+                    <label class="text-[9px] font-bold uppercase" style="color:var(--text-faint);">{{ _lbl.field_label_en }}</label>
+                    <input type="text" x-model="field.label_en" class="form-input text-xs py-1" placeholder="Problem Type">
+                  </div>
+                </div>
+                <div class="flex items-center gap-4">
+                  <label class="flex items-center gap-1.5 text-xs cursor-pointer" style="color:var(--text-muted);">
+                    <input type="checkbox" x-model="field.required" style="accent-color:#00AEEF;"> {{ _lbl.field_required }}
+                  </label>
+                  <button @click="dept.portal_fields.splice(fi,1)" class="text-xs text-red-500 hover:underline ms-auto">{{ _lbl.delete_field }}</button>
+                </div>
+
+                <!-- Options (for select type) -->
+                <div x-show="field.type === 'select'" class="rounded-lg border p-2 space-y-1" style="border-color:var(--border-color);">
+                  <p class="text-[9px] font-bold uppercase" style="color:var(--text-faint);">{{ _lbl.field_options }}</p>
+                  <template x-for="(opt, oi) in (field.options || [])" :key="oi">
+                    <div class="grid grid-cols-4 gap-1">
+                      <input type="text" x-model="opt.value" class="form-input text-xs py-0.5" dir="ltr" placeholder="value">
+                      <input type="text" x-model="opt.label_ar" class="form-input text-xs py-0.5" placeholder="عربي">
+                      <input type="text" x-model="opt.label_en" class="form-input text-xs py-0.5" placeholder="English">
+                      <button @click="field.options.splice(oi,1)" class="text-red-500 text-xs">✕</button>
+                    </div>
+                  </template>
+                  <button @click="if(!field.options) field.options=[]; field.options.push({value:'',label_ar:'',label_en:''})"
+                          class="text-xs font-bold hover:underline" style="color:#00AEEF;">+ {{ _lbl.add_option }}</button>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <button @click="saveFields(dept)" class="btn-primary btn-sm w-full mt-3 justify-center" style="display:flex;align-items:center;gap:5px;">
+            {{ _lbl.save }} {{ _lbl.fields }}
+          </button>
+          <div x-show="dept._saveMsg" x-transition class="text-center mt-2">
+            <span class="text-xs text-green-600" x-text="dept._saveMsg"></span>
+          </div>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Add/Edit Modal -->
+  <div x-show="showModal" x-transition class="modal-overlay" style="z-index:200;">
+    <div class="modal-box" style="max-width:500px;" @click.outside="showModal=false">
+      <div style="padding:20px 24px;border-bottom:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between;">
+        <h2 class="text-base font-bold" style="color:var(--text-ink);" x-text="editing ? '{{ _lbl.edit }}' : '{{ _lbl.add }}'"></h2>
+        <button @click="showModal=false" class="btn-ghost btn-sm" style="padding:6px;"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+      </div>
+      <div style="padding:20px 24px;" class="space-y-4">
+        <div><label class="form-label">{{ _lbl.name_ar }} *</label><input type="text" x-model="form.name_ar" class="form-input"></div>
+        <div><label class="form-label">{{ _lbl.name_en }}</label><input type="text" x-model="form.name_en" class="form-input"></div>
+        <div><label class="form-label">{{ _lbl.code }} *</label><input type="text" x-model="form.code" class="form-input" dir="ltr" placeholder="absher"></div>
+        <div x-show="formError" class="text-xs text-red-600" x-text="formError"></div>
+      </div>
+      <div style="padding:16px 24px;border-top:1px solid var(--border-color);display:flex;gap:8px;justify-content:flex-end;">
+        <button @click="showModal=false" class="btn-secondary btn-sm">{{ _lbl.cancel }}</button>
+        <button @click="saveDept()" :disabled="saving" class="btn-primary btn-sm">
+          <span x-text="editing ? '{{ _lbl.save }}' : '{{ _lbl.add }}'"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+window._deptData = {{ departments_json | safe }};
+function deptManager() {
+  return {
+    departments: [],
+    showModal: false,
+    editing: null,
+    form: { name_ar:'', name_en:'', code:'' },
+    formError: '',
+    saving: false,
+
+    init() { this.departments = window._deptData || []; },
+
+    openAdd() { this.editing=null; this.form={name_ar:'',name_en:'',code:''}; this.formError=''; this.showModal=true; },
+    openEdit(d) { this.editing=d; this.form={name_ar:d.name_ar,name_en:d.name_en,code:d.code}; this.formError=''; this.showModal=true; },
+
+    saveDept() {
+      var self=this;
+      if(!self.form.name_ar||!self.form.code){self.formError='{{ lang == "ar" and "الاسم والكود مطلوبين" or "Name and code required" }}';return;}
+      self.saving=true; self.formError='';
+      var url=self.editing?'/api/manager/departments/'+self.editing.id:'/api/manager/departments';
+      fetch(url,{method:self.editing?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(self.form)})
+        .then(function(r){return r.json();})
+        .then(function(d){
+          if(d.ok){self.showModal=false;location.reload();}
+          else{self.formError=d.detail||'Error';}
+          self.saving=false;
+        }).catch(function(){self.saving=false;self.formError='Error';});
+    },
+
+    toggleDept(d) {
+      fetch('/api/manager/departments/'+d.id+'/toggle',{method:'POST'})
+        .then(function(r){return r.json();})
+        .then(function(res){if(res.ok) d.is_active=res.is_active;});
+    },
+
+    addField(dept) {
+      if(!dept.portal_fields) dept.portal_fields=[];
+      dept.portal_fields.push({key:'',type:'select',label_ar:'',label_en:'',required:true,options:[]});
+    },
+
+    saveFields(dept) {
+      fetch('/api/manager/departments/'+dept.id+'/fields',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({fields:dept.portal_fields||[]})})
+        .then(function(r){return r.json();})
+        .then(function(d){
+          if(d.ok){dept._saveMsg='{{ lang == "ar" and "تم الحفظ" or "Saved" }}';setTimeout(function(){dept._saveMsg='';},2000);}
+        });
+    },
+  };
+}
+</script>
+{% endblock %}

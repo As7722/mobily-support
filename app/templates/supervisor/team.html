@@ -1,0 +1,760 @@
+{% extends "base_app.html" %}
+{% block title %}{{ t('sup.team_title', lang=lang) }} — موبايلي{% endblock %}
+{% block page_title %}{{ t('sup.team_title', lang=lang) }}{% endblock %}
+
+{% block content %}
+{% set _edit_branch = lang == 'ar' and 'تعديل الفرع' or 'Edit Branch' %}
+{% set _add_branch = lang == 'ar' and 'إضافة فرع جديد' or 'Add New Branch' %}
+{% set _save_changes = lang == 'ar' and 'حفظ التعديلات' or 'Save Changes' %}
+{% set _add_lbl = lang == 'ar' and 'إضافة' or 'Add' %}
+{% set _branch_emps = lang == 'ar' and 'موظفو فرع:' or 'Branch Employees:' %}
+{% set _emp_count_lbl = lang == 'ar' and 'موظف' or 'employees' %}
+{% set _employees_lbl = lang == 'ar' and 'الموظفون' or 'Employees' %}
+{% set _active_lbl = lang == 'ar' and 'نشط' or 'Active' %}
+{% set _inactive_lbl = lang == 'ar' and 'معطل' or 'Inactive' %}
+{% set _edit_emp = lang == 'ar' and 'تعديل بيانات الموظف' or 'Edit Employee' %}
+{% set _add_emp = lang == 'ar' and 'إضافة موظف جديد' or 'Add New Employee' %}
+{% set _save_lbl = lang == 'ar' and 'حفظ' or 'Save' %}
+{% set _sure_lbl = lang == 'ar' and 'هل أنت متأكد؟' or 'Are you sure?' %}
+{% set _sure_del = lang == 'ar' and 'هل أنت متأكد من الحذف؟' or 'Are you sure you want to delete?' %}
+{% set _name_code_req = lang == 'ar' and 'الاسم والكود مطلوبين' or 'Name and code are required' %}
+{% set _name_id_req = lang == 'ar' and 'الاسم والرقم الوظيفي مطلوبين' or 'Name and employee ID are required' %}
+
+<div class="p-6"
+     x-data="{
+       activeTab: '{{ active_tab }}',
+       agentModal: false,
+       scheduleData: {},
+       conflictMsg: ''
+     }">
+
+  <!-- Tabs -->
+  <div class="flex gap-1 rounded-xl p-1 mb-6 shadow-sm" style="background: var(--bg-card); border: 1px solid var(--border-color);">
+    {% for tab_id, tab_label in [('agents', lang == 'ar' and 'الموظفون' or 'Agents'), ('branches', lang == 'ar' and 'الفروع والموظفون' or 'Branches & Employees'), ('schedule', lang == 'ar' and 'الجداول' or 'Schedule'), ('reports', lang == 'ar' and 'التقارير' or 'Reports')] %}
+    <button @click="activeTab = '{{ tab_id }}'"
+            :class="activeTab === '{{ tab_id }}' ? 'bg-primary text-white shadow-sm' : 'hover:bg-gray-50 dark:hover:bg-gray-800'"
+            :style="activeTab !== '{{ tab_id }}' ? 'color: var(--text-muted);' : ''"
+            class="flex-1 rounded-lg py-2.5 text-sm font-semibold transition-all">
+      {{ tab_label }}
+    </button>
+    {% endfor %}
+  </div>
+
+  <!-- ══ TAB: AGENTS ══════════════════════════════════════════════════════ -->
+  <div x-show="activeTab === 'agents'" x-transition>
+    <div class="card overflow-hidden">
+      <div class="flex items-center justify-between px-5 py-4" style="border-bottom: 1px solid var(--border-color);">
+        <h2 class="text-sm font-semibold" style="color: var(--text-ink);">
+          {{ t('sup.agents_count', lang=lang).replace('{n}', agents|length|string) }}
+        </h2>
+        <div class="flex gap-2">
+          <label class="btn-secondary text-xs py-1.5 cursor-pointer" style="display:inline-flex;align-items:center;gap:4px;">
+            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/></svg>
+            {{ t('sup.import_preview', lang=lang) }}
+            <input type="file" id="import-file" name="file" accept=".xlsx,.xls" class="sr-only"
+                   hx-post="/api/supervisor/agents/import/preview"
+                   hx-encoding="multipart/form-data"
+                   hx-target="#import-result"
+                   hx-swap="innerHTML">
+          </label>
+          <a href="/api/supervisor/agents/export" class="btn-secondary text-xs py-1.5" style="display:inline-flex;align-items:center;gap:4px;">
+            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+            {{ t('sup.export_excel', lang=lang) }}
+          </a>
+          <button @click="agentModal = true" class="btn-primary text-xs py-1.5" style="display:inline-flex;align-items:center;gap:4px;">
+            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+            {{ t('sup.add_agent', lang=lang) }}
+          </button>
+        </div>
+      </div>
+      <div id="import-result"></div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>{{ t('auth.username', lang=lang) }}</th>
+            <th>{{ lang == 'ar' and 'الاسم' or 'Name' }}</th>
+            <th>{{ t('portal.submitter_email', lang=lang) }}</th>
+            <th>{{ t('portal.submitter_phone', lang=lang) }}</th>
+            <th>{{ t('dash.online', lang=lang) }}</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="agents-table-body">
+          {% for agent in agents %}
+          <tr id="agent-row-{{ agent.id }}">
+            <td class="font-mono text-xs">{{ agent.username }}</td>
+            <td>{{ agent.full_name_ar if lang == 'ar' else (agent.full_name_en or agent.full_name_ar) }}</td>
+            <td class="text-xs" style="color: var(--text-muted);">{{ agent.email or '—' }}</td>
+            <td class="text-xs" style="color: var(--text-muted);" dir="ltr">{{ agent.phone or '—' }}</td>
+            <td><span class="h-2 w-2 rounded-full inline-block {% if agent.is_online %}bg-green-500{% else %}bg-gray-300{% endif %}"></span></td>
+            <td>
+              <button hx-delete="/api/supervisor/agents/{{ agent.id }}" hx-confirm="{{ t('app.confirm', lang=lang) }}?"
+                      hx-target="#agent-row-{{ agent.id }}" hx-swap="outerHTML"
+                      class="text-xs text-red-500 hover:text-red-700">
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+              </button>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" class="text-center py-8 text-sm" style="color: var(--text-faint);">—</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ══ TAB: BRANCHES & EMPLOYEES ══════════════════════════════════════ -->
+  <div x-show="activeTab === 'branches'" x-transition x-data="branchManager()" x-init="init()">
+
+    <!-- KPI Strip -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-5">
+      <div class="kpi-card kpi-card-blue"><div class="flex items-center gap-3 p-4">
+        <div class="kpi-icon kpi-icon-blue"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3H21m-3.75 3H21"/></svg></div>
+        <div>
+          <p class="text-xs font-semibold" style="color:var(--text-muted);">{{ lang == 'ar' and 'إجمالي الفروع' or 'Total Branches' }}</p>
+          <p class="text-2xl font-black" style="color:var(--text-ink);">{{ branch_stats.total_branches }}</p>
+        </div>
+      </div></div>
+      <div class="kpi-card kpi-card-green"><div class="flex items-center gap-3 p-4">
+        <div class="kpi-icon kpi-icon-green"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div>
+        <div>
+          <p class="text-xs font-semibold" style="color:var(--text-muted);">{{ lang == 'ar' and 'فروع نشطة' or 'Active Branches' }}</p>
+          <p class="text-2xl font-black" style="color:var(--text-ink);">{{ branch_stats.active_branches }}</p>
+        </div>
+      </div></div>
+      <div class="kpi-card kpi-card-amber"><div class="flex items-center gap-3 p-4">
+        <div class="kpi-icon kpi-icon-amber"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/></svg></div>
+        <div>
+          <p class="text-xs font-semibold" style="color:var(--text-muted);">{{ lang == 'ar' and 'إجمالي الموظفين' or 'Total Employees' }}</p>
+          <p class="text-2xl font-black" style="color:var(--text-ink);">{{ branch_stats.total_employees }}</p>
+        </div>
+      </div></div>
+      <div class="kpi-card kpi-card-slate"><div class="flex items-center gap-3 p-4">
+        <div class="kpi-icon kpi-icon-slate"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5zm6-10.125a1.875 1.875 0 11-3.75 0 1.875 1.875 0 013.75 0zm1.294 6.336a6.721 6.721 0 01-3.17.789 6.721 6.721 0 01-3.168-.789 3.376 3.376 0 016.338 0z"/></svg></div>
+        <div>
+          <p class="text-xs font-semibold" style="color:var(--text-muted);">{{ lang == 'ar' and 'تذاكر الفروع' or 'Branch Tickets' }}</p>
+          <p class="text-2xl font-black" style="color:var(--text-ink);">{{ branch_stats.branch_tickets }}</p>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- Toolbar Card -->
+    <div class="card overflow-hidden mb-4">
+      <!-- Action Row -->
+      <div class="flex flex-wrap gap-2 px-4 py-3 items-center" style="border-bottom:1px solid var(--border-color);">
+        <div class="flex-1 min-w-0">
+          <h2 class="text-sm font-bold" style="color:var(--text-ink);">{{ lang == 'ar' and 'إدارة الفروع والموظفين' or 'Branch & Employee Management' }}</h2>
+          <p class="text-xs mt-0.5" style="color:var(--text-faint);">
+            <span x-text="totalBranches"></span> {{ lang == 'ar' and 'فرع' or 'branches' }} &nbsp;·&nbsp; {{ branch_stats.total_employees }} {{ lang == 'ar' and 'موظف' or 'employees' }}
+          </p>
+        </div>
+        <a href="/api/supervisor/branches/import/template"
+           class="btn-secondary btn-sm inline-flex items-center gap-1.5">
+          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
+          <span>{{ lang == 'ar' and 'تحميل القالب' or 'Download Template' }}</span>
+        </a>
+        <label class="btn-secondary btn-sm inline-flex items-center gap-1.5 cursor-pointer">
+          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/></svg>
+          <span>{{ lang == 'ar' and 'استيراد Excel' or 'Import Excel' }}</span>
+          <input type="file" accept=".xlsx,.xls" class="sr-only" @change="importBulkExcel($event)">
+        </label>
+        <button @click="exportBranches()" class="btn-secondary btn-sm inline-flex items-center gap-1.5">
+          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+          <span>{{ lang == 'ar' and 'تصدير الفروع' or 'Export Branches' }}</span>
+        </button>
+        <button @click="exportAllBranchesWithEmployees()" class="btn-secondary btn-sm inline-flex items-center gap-1.5">
+          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+          <span>{{ lang == 'ar' and 'تصدير الكل' or 'Export All' }}</span>
+        </button>
+        <button @click="openBranchModal()" class="btn-primary btn-sm inline-flex items-center gap-1.5">
+          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+          <span>{{ lang == 'ar' and 'إضافة فرع' or 'Add Branch' }}</span>
+        </button>
+      </div>
+
+      <!-- Filter Row -->
+      <div class="flex flex-wrap gap-3 px-4 py-3 items-center">
+        <div class="relative flex-1" style="min-width:220px;">
+          <svg class="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color:var(--text-faint);"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803a7.5 7.5 0 0010.607 0z"/></svg>
+          <input type="text" x-model="search" @input="onSearchInput()"
+                 placeholder="{{ lang == 'ar' and 'بحث بالاسم أو الكود أو المدينة...' or 'Search by name, code or city...' }}"
+                 class="form-input ps-9 w-full text-sm">
+        </div>
+        <select @change="regionFilter = $event.target.value; onFilterChange()" class="form-input text-sm" style="min-width:150px;">
+          <option value="all">{{ lang == 'ar' and 'كل المناطق' or 'All Regions' }}</option>
+          {% for r in regions %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+        </select>
+        <select @change="cityFilter = $event.target.value; onFilterChange()" class="form-input text-sm" style="min-width:130px;">
+          <option value="all">{{ lang == 'ar' and 'كل المدن' or 'All Cities' }}</option>
+          {% for c in cities %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+        </select>
+        <select @change="statusFilter = $event.target.value; onFilterChange()" class="form-input text-sm" style="min-width:110px;">
+          <option value="all">{{ lang == 'ar' and 'الكل' or 'All Status' }}</option>
+          <option value="active">{{ _active_lbl }}</option>
+          <option value="inactive">{{ _inactive_lbl }}</option>
+        </select>
+        <select @change="perPage = parseInt($event.target.value); currentPage = 1; loadBranches()" class="form-input text-sm" style="min-width:110px;">
+          <option value="25">25 / {{ lang == 'ar' and 'صفحة' or 'page' }}</option>
+          <option value="50" selected>50 / {{ lang == 'ar' and 'صفحة' or 'page' }}</option>
+          <option value="100">100 / {{ lang == 'ar' and 'صفحة' or 'page' }}</option>
+          <option value="200">200 / {{ lang == 'ar' and 'صفحة' or 'page' }}</option>
+        </select>
+      </div>
+
+      <!-- Import status banner -->
+      <div x-show="importMsg" x-transition class="mx-4 mb-3 rounded-lg px-3 py-2 text-xs font-medium"
+           :class="importOk ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800' : 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800'"
+           x-text="importMsg"></div>
+    </div>
+
+    <!-- Branch Table -->
+    <div class="card overflow-hidden mb-5" style="position:relative;">
+      <!-- Loading overlay -->
+      <div x-show="loading" x-transition
+           style="position:absolute;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.75);">
+        <svg class="h-8 w-8 animate-spin" style="color:var(--primary);" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+        </svg>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="data-table" style="min-width:700px;">
+          <thead>
+            <tr>
+              <th class="w-10 text-center">#</th>
+              <th style="min-width:80px;">{{ lang == 'ar' and 'الكود' or 'Code' }}</th>
+              <th style="min-width:180px;">{{ lang == 'ar' and 'الاسم' or 'Name' }}</th>
+              <th style="min-width:100px;">{{ lang == 'ar' and 'المنطقة' or 'Region' }}</th>
+              <th style="min-width:90px;">{{ lang == 'ar' and 'المدينة' or 'City' }}</th>
+              <th class="text-center" style="min-width:80px;">{{ lang == 'ar' and 'الموظفون' or 'Employees' }}</th>
+              <th class="text-center" style="min-width:80px;">{{ lang == 'ar' and 'الحالة' or 'Status' }}</th>
+              <th class="text-center" style="min-width:100px;">{{ lang == 'ar' and 'إجراءات' or 'Actions' }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(branch, idx) in branches" :key="branch.id">
+              <tr class="hover:bg-blue-50/30 dark:hover:bg-blue-950/20 transition-colors cursor-default">
+                <td class="text-center text-xs" style="color:var(--text-faint);" x-text="(currentPage-1)*perPage + idx + 1"></td>
+                <td>
+                  <code class="text-xs font-mono px-2 py-0.5 rounded" style="background:var(--bg-page);color:var(--text-muted);" x-text="branch.code"></code>
+                </td>
+                <td>
+                  <div class="font-semibold text-sm" style="color:var(--text-ink);" x-text="branch.name_{{ lang }}"></div>
+                  <div class="text-[11px]" style="color:var(--text-faint);" x-show="branch.name_{{ lang == 'ar' and 'en' or 'ar' }}" x-text="branch.name_{{ lang == 'ar' and 'en' or 'ar' }}"></div>
+                </td>
+                <td class="text-xs" style="color:var(--text-muted);" x-text="branch.region_ar || '—'"></td>
+                <td class="text-xs" style="color:var(--text-muted);" x-text="branch.city_ar || '—'"></td>
+                <td class="text-center">
+                  <button @click="viewEmployees(branch)"
+                          class="inline-flex items-center justify-center min-w-[2.2rem] px-2 py-0.5 rounded-full text-xs font-bold transition-all hover:scale-105"
+                          :title="'{{ lang == 'ar' and 'عرض الموظفين' or 'View employees' }}'"
+                          :style="branch.employee_count > 0 ? 'background:rgba(0,174,239,0.12);color:#0099cc;' : 'background:rgba(100,116,139,0.1);color:#94A3B8;'"
+                          x-text="branch.employee_count"></button>
+                </td>
+                <td class="text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold"
+                        :style="branch.is_active ? 'background:rgba(16,185,129,0.1);color:#10B981;' : 'background:rgba(239,68,68,0.1);color:#EF4444;'"
+                        x-text="branch.is_active ? '{{ _active_lbl }}' : '{{ _inactive_lbl }}'"></span>
+                </td>
+                <td>
+                  <div class="flex items-center justify-center gap-1">
+                    <button @click="editBranch(branch)" class="btn-ghost btn-sm p-1" title="{{ lang == 'ar' and 'تعديل' or 'Edit' }}">
+                      <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"/></svg>
+                    </button>
+                    <button @click="toggleBranch(branch)" class="btn-ghost btn-sm p-1" :title="branch.is_active ? '{{ lang == 'ar' and 'تعطيل' or 'Disable' }}' : '{{ lang == 'ar' and 'تفعيل' or 'Enable' }}'">
+                      <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" :style="branch.is_active ? 'color:#EF4444;' : 'color:#10B981;'">
+                        <path x-show="branch.is_active" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>
+                        <path x-show="!branch.is_active" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                      </svg>
+                    </button>
+                    <button @click="viewEmployees(branch)" class="btn-ghost btn-sm p-1" title="{{ lang == 'ar' and 'الموظفون' or 'Employees' }}">
+                      <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/></svg>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+            <tr x-show="!loading && branches.length === 0">
+              <td colspan="8" class="py-14 text-center">
+                <svg class="mx-auto h-12 w-12 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color:var(--text-faint);"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3H21m-3.75 3H21"/></svg>
+                <p class="text-sm font-bold" style="color:var(--text-muted);">{{ lang == 'ar' and 'لا توجد فروع تطابق البحث' or 'No branches match your search' }}</p>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination -->
+      <div class="flex items-center justify-between px-4 py-3" style="border-top:1px solid var(--border-color);">
+        <div class="text-xs" style="color:var(--text-faint);">
+          <span x-text="totalBranches > 0 ? ((currentPage-1)*perPage+1) + '–' + Math.min(currentPage*perPage, totalBranches) + ' / ' + totalBranches : '0'"></span>
+          <span class="ms-1">{{ lang == 'ar' and 'فرع' or 'branches' }}</span>
+        </div>
+        <div class="flex items-center gap-1" x-show="totalPages > 1">
+          <button @click="goPage(1)" :disabled="currentPage <= 1" class="btn-ghost btn-sm px-2 py-1 text-sm disabled:opacity-40">«</button>
+          <button @click="goPage(currentPage - 1)" :disabled="currentPage <= 1" class="btn-ghost btn-sm px-2 py-1 text-sm disabled:opacity-40">‹</button>
+          <template x-for="p in pageNumbers" :key="p">
+            <button @click="goPage(p)"
+                    :class="p === currentPage ? 'btn-primary' : 'btn-ghost'"
+                    class="btn-sm px-2.5 py-1 text-xs font-semibold rounded min-w-[2rem]"
+                    x-text="p"></button>
+          </template>
+          <button @click="goPage(currentPage + 1)" :disabled="currentPage >= totalPages" class="btn-ghost btn-sm px-2 py-1 text-sm disabled:opacity-40">›</button>
+          <button @click="goPage(totalPages)" :disabled="currentPage >= totalPages" class="btn-ghost btn-sm px-2 py-1 text-sm disabled:opacity-40">»</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═ Branch Add/Edit Modal ═ -->
+    <div x-show="showBranchModal" x-transition class="modal-overlay" style="z-index:200;">
+      <div class="modal-box" style="max-width:620px;" @click.outside="showBranchModal = false">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid var(--border-color);">
+          <div>
+            <h2 class="text-base font-bold" style="color:var(--text-ink);" x-text="editingBranch ? '{{ _edit_branch }}' : '{{ _add_branch }}'"></h2>
+            <p class="text-xs mt-0.5" style="color:var(--text-faint);" x-show="editingBranch" x-text="editingBranch ? editingBranch.code : ''"></p>
+          </div>
+          <button @click="showBranchModal = false" class="btn-ghost btn-sm" style="padding:6px;"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+        </div>
+        <div style="padding:20px 24px;max-height:70vh;overflow-y:auto;" class="space-y-4">
+          <div class="grid grid-cols-2 gap-4">
+            <div><label class="form-label">{{ lang == 'ar' and 'الاسم (عربي)' or 'Name (AR)' }} <span class="text-red-500">*</span></label><input type="text" x-model="branchForm.name_ar" class="form-input w-full" dir="rtl"></div>
+            <div><label class="form-label">{{ lang == 'ar' and 'الاسم (إنجليزي)' or 'Name (EN)' }}</label><input type="text" x-model="branchForm.name_en" class="form-input w-full" dir="ltr"></div>
+          </div>
+          <div class="grid grid-cols-3 gap-4">
+            <div><label class="form-label">{{ lang == 'ar' and 'الكود' or 'Code' }} <span class="text-red-500">*</span></label><input type="text" x-model="branchForm.code" class="form-input w-full" dir="ltr" placeholder="RYD-01"></div>
+            <div><label class="form-label">{{ lang == 'ar' and 'المدينة (عربي)' or 'City (AR)' }}</label><input type="text" x-model="branchForm.city_ar" class="form-input w-full" dir="rtl"></div>
+            <div><label class="form-label">{{ lang == 'ar' and 'المدينة (إنجليزي)' or 'City (EN)' }}</label><input type="text" x-model="branchForm.city_en" class="form-input w-full" dir="ltr"></div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div><label class="form-label">{{ lang == 'ar' and 'المنطقة (عربي)' or 'Region (AR)' }}</label><input type="text" x-model="branchForm.region_ar" class="form-input w-full" dir="rtl"></div>
+            <div><label class="form-label">{{ lang == 'ar' and 'المنطقة (إنجليزي)' or 'Region (EN)' }}</label><input type="text" x-model="branchForm.region_en" class="form-input w-full" dir="ltr"></div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div><label class="form-label">{{ lang == 'ar' and 'الهاتف' or 'Phone' }}</label><input type="tel" x-model="branchForm.phone" class="form-input w-full" dir="ltr"></div>
+            <div><label class="form-label">{{ lang == 'ar' and 'البريد الإلكتروني' or 'Email' }}</label><input type="email" x-model="branchForm.email" class="form-input w-full" dir="ltr"></div>
+          </div>
+          <div><label class="form-label">{{ lang == 'ar' and 'ملاحظات داخلية' or 'Internal Notes' }}</label><textarea x-model="branchForm.internal_notes" class="form-input w-full" rows="2"></textarea></div>
+          <div x-show="branchError" x-transition class="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-3 py-2"><p class="text-xs text-red-600 dark:text-red-400 font-medium" x-text="branchError"></p></div>
+        </div>
+        <div style="padding:16px 24px;border-top:1px solid var(--border-color);display:flex;gap:8px;justify-content:flex-end;">
+          <button @click="showBranchModal = false" class="btn-secondary btn-sm">{{ lang == 'ar' and 'إلغاء' or 'Cancel' }}</button>
+          <button @click="saveBranch()" :disabled="savingBranch" class="btn-primary btn-sm inline-flex items-center gap-2">
+            <svg x-show="savingBranch" class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+            <span x-text="editingBranch ? '{{ _save_changes }}' : '{{ _add_lbl }}'"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═ Employees Slide-over Panel (table-based, paginated) ═ -->
+    <div x-show="showEmployeesPanel" x-transition class="modal-overlay" style="z-index:200;">
+      <div style="position:fixed;inset-inline-end:0;top:0;bottom:0;width:min(820px,95vw);background:var(--bg-card);box-shadow:-8px 0 50px rgba(0,0,0,0.18);display:flex;flex-direction:column;overflow:hidden;" @click.outside="showEmployeesPanel = false">
+
+        <!-- Panel Header -->
+        <div style="padding:16px 22px;border-bottom:1px solid var(--border-color);display:flex;align-items:center;gap:12px;flex-shrink:0;background:var(--bg-card);">
+          <button @click="showEmployeesPanel = false" class="btn-ghost btn-sm" style="padding:6px;flex-shrink:0;">
+            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+          <div class="flex-1 min-w-0">
+            <h2 class="text-base font-bold truncate" style="color:var(--text-ink);" x-text="selectedBranch ? selectedBranch.name_{{ lang }} : ''"></h2>
+            <div class="flex items-center gap-3 mt-0.5">
+              <span class="text-xs font-mono" style="color:var(--text-faint);" x-text="selectedBranch ? selectedBranch.code : ''"></span>
+              <span class="text-xs" style="color:var(--text-faint);">·</span>
+              <span class="text-xs font-semibold" style="color:var(--primary);" x-text="totalEmployees + ' {{ lang == 'ar' and 'موظف' or 'employees' }}'"></span>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 flex-shrink-0">
+            <button @click="exportSelectedBranchEmployees()" class="btn-secondary btn-sm inline-flex items-center gap-1.5">
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+              <span>{{ lang == 'ar' and 'تصدير' or 'Export' }}</span>
+            </button>
+            <label class="btn-secondary btn-sm inline-flex items-center gap-1.5 cursor-pointer">
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/></svg>
+              <span>{{ lang == 'ar' and 'استيراد' or 'Import' }}</span>
+              <input type="file" accept=".xlsx,.xls" class="sr-only" @change="handleImportFile($event)">
+            </label>
+            <button @click="openEmployeeModal()" class="btn-primary btn-sm inline-flex items-center gap-1.5">
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+              <span>{{ lang == 'ar' and 'إضافة موظف' or 'Add Employee' }}</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Employee Filters -->
+        <div style="padding:10px 22px;border-bottom:1px solid var(--border-color);flex-shrink:0;display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--bg-page);">
+          <div class="relative flex-1" style="min-width:200px;">
+            <svg class="absolute start-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color:var(--text-faint);"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803a7.5 7.5 0 0010.607 0z"/></svg>
+            <input type="text" x-model="empSearch" @input="onEmpSearchInput()"
+                   placeholder="{{ lang == 'ar' and 'بحث بالاسم أو الرقم الوظيفي أو الجوال...' or 'Search by name, ID or phone...' }}"
+                   class="form-input ps-9 w-full text-sm">
+          </div>
+          <select @change="empStatusFilter = $event.target.value; onEmpFilterChange()" class="form-input text-sm" style="min-width:110px;">
+            <option value="all">{{ lang == 'ar' and 'الكل' or 'All Status' }}</option>
+            <option value="active">{{ _active_lbl }}</option>
+            <option value="inactive">{{ _inactive_lbl }}</option>
+          </select>
+          <select @change="empPerPage = parseInt($event.target.value); empCurrentPage = 1; loadEmployees()" class="form-input text-sm" style="min-width:110px;">
+            <option value="25">25 / {{ lang == 'ar' and 'صفحة' or 'page' }}</option>
+            <option value="50" selected>50 / {{ lang == 'ar' and 'صفحة' or 'page' }}</option>
+            <option value="100">100 / {{ lang == 'ar' and 'صفحة' or 'page' }}</option>
+          </select>
+        </div>
+
+        <!-- Employee Table -->
+        <div style="flex:1;overflow-y:auto;position:relative;">
+          <!-- Loading overlay -->
+          <div x-show="empLoading" x-transition
+               style="position:absolute;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.75);">
+            <svg class="h-7 w-7 animate-spin" style="color:var(--primary);" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+          </div>
+          <table class="data-table" style="min-width:600px;">
+            <thead style="position:sticky;top:0;z-index:2;background:var(--bg-card);">
+              <tr>
+                <th class="w-8 text-center">#</th>
+                <th style="min-width:160px;">{{ lang == 'ar' and 'الاسم' or 'Name' }}</th>
+                <th style="min-width:100px;">{{ lang == 'ar' and 'الرقم الوظيفي' or 'Employee ID' }}</th>
+                <th style="min-width:110px;">{{ lang == 'ar' and 'الجوال' or 'Phone' }}</th>
+                <th style="min-width:110px;">{{ lang == 'ar' and 'المنصب' or 'Position' }}</th>
+                <th class="text-center" style="min-width:70px;">{{ lang == 'ar' and 'الحالة' or 'Status' }}</th>
+                <th class="text-center" style="min-width:110px;">{{ lang == 'ar' and 'إجراءات' or 'Actions' }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="(emp, ei) in employees" :key="emp.id">
+                <tr class="hover:bg-blue-50/30 dark:hover:bg-blue-950/20 transition-colors">
+                  <td class="text-center text-xs" style="color:var(--text-faint);" x-text="(empCurrentPage-1)*empPerPage + ei + 1"></td>
+                  <td>
+                    <div class="flex items-center gap-2">
+                      <div style="width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;flex-shrink:0;"
+                           :style="emp.is_active ? 'background:rgba(0,174,239,0.1);color:#00AEEF;' : 'background:rgba(100,116,139,0.1);color:#94A3B8;'">
+                        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>
+                      </div>
+                      <div class="min-w-0">
+                        <div class="text-sm font-semibold truncate" style="color:var(--text-ink);" x-text="emp.full_name_{{ lang }} || emp.full_name_ar"></div>
+                        <div class="text-[11px] truncate" style="color:var(--text-faint);" x-show="emp.full_name_{{ lang == 'ar' and 'en' or 'ar' }}" x-text="emp.full_name_{{ lang == 'ar' and 'en' or 'ar' }}"></div>
+                      </div>
+                    </div>
+                  </td>
+                  <td><code class="text-xs font-mono" style="color:var(--text-muted);" dir="ltr" x-text="emp.employee_id"></code></td>
+                  <td class="text-xs" style="color:var(--text-muted);" dir="ltr" x-text="emp.phone || '—'"></td>
+                  <td class="text-xs" style="color:var(--text-muted);" x-text="emp.position_{{ lang }} || emp.position_ar || '—'"></td>
+                  <td class="text-center">
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold"
+                          :style="emp.is_active ? 'background:rgba(16,185,129,0.1);color:#10B981;' : 'background:rgba(239,68,68,0.1);color:#EF4444;'"
+                          x-text="emp.is_active ? '{{ _active_lbl }}' : '{{ _inactive_lbl }}'"></span>
+                  </td>
+                  <td>
+                    <div class="flex items-center justify-center gap-1">
+                      <button @click="duplicateEmployee(emp)" class="btn-ghost btn-sm p-1" title="{{ lang == 'ar' and 'نسخ' or 'Duplicate' }}">
+                        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75"/></svg>
+                      </button>
+                      <button @click="editEmployee(emp)" class="btn-ghost btn-sm p-1" title="{{ lang == 'ar' and 'تعديل' or 'Edit' }}">
+                        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"/></svg>
+                      </button>
+                      <button @click="toggleEmployee(emp)" class="btn-ghost btn-sm p-1">
+                        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" :style="emp.is_active ? 'color:#EF4444;' : 'color:#10B981;'">
+                          <path x-show="emp.is_active" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>
+                          <path x-show="!emp.is_active" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                      </button>
+                      <button @click="deleteEmployee(emp)" class="btn-ghost btn-sm p-1" style="color:#EF4444;" title="{{ lang == 'ar' and 'حذف' or 'Delete' }}">
+                        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+              <tr x-show="!empLoading && employees.length === 0">
+                <td colspan="7" class="py-12 text-center">
+                  <svg class="mx-auto h-10 w-10 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color:var(--text-faint);"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>
+                  <p class="text-sm font-bold" style="color:var(--text-muted);">{{ lang == 'ar' and 'لا يوجد موظفون' or 'No employees found' }}</p>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Employee Pagination -->
+        <div style="padding:10px 22px;border-top:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:var(--bg-card);">
+          <div class="text-xs" style="color:var(--text-faint);">
+            <span x-text="totalEmployees > 0 ? ((empCurrentPage-1)*empPerPage+1) + '–' + Math.min(empCurrentPage*empPerPage, totalEmployees) + ' / ' + totalEmployees : '0'"></span>
+            <span class="ms-1">{{ lang == 'ar' and 'موظف' or 'employees' }}</span>
+          </div>
+          <div class="flex items-center gap-1" x-show="empTotalPages > 1">
+            <button @click="empGoPage(1)" :disabled="empCurrentPage <= 1" class="btn-ghost btn-sm px-2 py-1 text-sm disabled:opacity-40">«</button>
+            <button @click="empGoPage(empCurrentPage-1)" :disabled="empCurrentPage <= 1" class="btn-ghost btn-sm px-2 py-1 text-sm disabled:opacity-40">‹</button>
+            <template x-for="p in empPageNumbers" :key="p">
+              <button @click="empGoPage(p)"
+                      :class="p === empCurrentPage ? 'btn-primary' : 'btn-ghost'"
+                      class="btn-sm px-2.5 py-1 text-xs font-semibold rounded min-w-[2rem]"
+                      x-text="p"></button>
+            </template>
+            <button @click="empGoPage(empCurrentPage+1)" :disabled="empCurrentPage >= empTotalPages" class="btn-ghost btn-sm px-2 py-1 text-sm disabled:opacity-40">›</button>
+            <button @click="empGoPage(empTotalPages)" :disabled="empCurrentPage >= empTotalPages" class="btn-ghost btn-sm px-2 py-1 text-sm disabled:opacity-40">»</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═ Employee Add/Edit Modal ═ -->
+    <div x-show="showEmployeeModal" x-transition class="modal-overlay" style="z-index:210;">
+      <div class="modal-box" style="max-width:580px;" @click.outside="showEmployeeModal = false">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid var(--border-color);">
+          <div>
+            <h2 class="text-base font-bold" style="color:var(--text-ink);" x-text="editingEmployee ? '{{ _edit_emp }}' : '{{ _add_emp }}'"></h2>
+            <p class="text-xs mt-0.5" style="color:var(--text-faint);" x-show="selectedBranch" x-text="selectedBranch ? selectedBranch.name_{{ lang }} : ''"></p>
+          </div>
+          <button @click="showEmployeeModal = false" class="btn-ghost btn-sm" style="padding:6px;"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+        </div>
+        <div style="padding:20px 24px;max-height:70vh;overflow-y:auto;" class="space-y-4">
+          <div class="grid grid-cols-2 gap-4">
+            <div><label class="form-label">{{ lang == 'ar' and 'الاسم (عربي)' or 'Name (AR)' }} <span class="text-red-500">*</span></label><input type="text" x-model="empForm.full_name_ar" class="form-input w-full" dir="rtl"></div>
+            <div><label class="form-label">{{ lang == 'ar' and 'الاسم (إنجليزي)' or 'Name (EN)' }}</label><input type="text" x-model="empForm.full_name_en" class="form-input w-full" dir="ltr"></div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div><label class="form-label">{{ lang == 'ar' and 'الرقم الوظيفي' or 'Employee ID' }} <span class="text-red-500">*</span></label><input type="text" x-model="empForm.employee_id" class="form-input w-full" dir="ltr" placeholder="EMP-XXXX"></div>
+            <div><label class="form-label">{{ lang == 'ar' and 'الجوال' or 'Phone' }}</label><input type="tel" x-model="empForm.phone" class="form-input w-full" dir="ltr"></div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div><label class="form-label">{{ lang == 'ar' and 'البريد الإلكتروني' or 'Email' }}</label><input type="email" x-model="empForm.email" class="form-input w-full" dir="ltr"></div>
+            <div><label class="form-label">{{ lang == 'ar' and 'اللغة المفضلة' or 'Preferred Language' }}</label>
+              <select x-model="empForm.preferred_language" class="form-input w-full">
+                <option value="ar">العربية</option>
+                <option value="en">English</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div><label class="form-label">{{ lang == 'ar' and 'المنصب (عربي)' or 'Position (AR)' }}</label><input type="text" x-model="empForm.position_ar" class="form-input w-full" dir="rtl"></div>
+            <div><label class="form-label">{{ lang == 'ar' and 'المنصب (إنجليزي)' or 'Position (EN)' }}</label><input type="text" x-model="empForm.position_en" class="form-input w-full" dir="ltr"></div>
+          </div>
+          <div x-show="empError" x-transition class="rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-3 py-2">
+            <p class="text-xs text-red-600 dark:text-red-400 font-medium" x-text="empError"></p>
+          </div>
+        </div>
+        <div style="padding:16px 24px;border-top:1px solid var(--border-color);display:flex;gap:8px;justify-content:flex-end;">
+          <button @click="showEmployeeModal = false" class="btn-secondary btn-sm">{{ lang == 'ar' and 'إلغاء' or 'Cancel' }}</button>
+          <button @click="saveEmployee()" :disabled="savingEmployee" class="btn-primary btn-sm inline-flex items-center gap-2">
+            <svg x-show="savingEmployee" class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+            <span x-text="editingEmployee ? '{{ _save_lbl }}' : '{{ _add_lbl }}'"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══ TAB: SCHEDULE ════════════════════════════════════════════════════ -->
+  <div x-show="activeTab === 'schedule'" x-transition>
+    <div class="card p-5">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-sm font-semibold" style="color: var(--text-ink);">{{ lang == 'ar' and 'جدول الورديات' or 'Shift Schedule' }}</h2>
+        <button hx-post="/api/supervisor/schedule" hx-include="#schedule-form"
+                hx-target="#schedule-result" class="btn-primary text-xs py-1.5">
+          {{ t('app.save', lang=lang) }}
+        </button>
+      </div>
+      <div id="schedule-form" class="overflow-x-auto">
+        <table class="w-full text-xs border-collapse">
+          <thead><tr>
+            <th class="p-2 text-start font-medium" style="color: var(--text-muted);">{{ lang == 'ar' and 'الموظف' or 'Agent' }}</th>
+            {% for day in (['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس'] if lang == 'ar' else ['Sun','Mon','Tue','Wed','Thu']) %}
+            <th class="p-2 text-center font-medium" style="color: var(--text-muted);">{{ day }}</th>
+            {% endfor %}
+          </tr></thead>
+          <tbody>
+            {% for agent in agents[:10] %}
+            <tr style="border-top: 1px solid var(--border-color);">
+              <td class="p-2 font-medium whitespace-nowrap" style="color: var(--text-ink);">{{ agent.full_name_ar if lang == 'ar' else (agent.full_name_en or agent.full_name_ar) }}</td>
+              {% for day_idx in range(5) %}
+              <td class="p-1">
+                <select name="schedule[{{ agent.id }}][{{ day_idx }}]" class="form-input text-xs py-1 px-2">
+                  <option value="">—</option>
+                  <option value="morning">08:00–16:00</option>
+                  <option value="evening">16:00–00:00</option>
+                  <option value="off">{{ lang == 'ar' and 'إجازة' or 'Off' }}</option>
+                </select>
+              </td>
+              {% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p x-show="conflictMsg" class="mt-3 text-xs text-amber-600" x-text="conflictMsg"></p>
+      <div id="schedule-result"></div>
+    </div>
+  </div>
+
+  <!-- ══ TAB: REPORTS ════════════════════════════════════════════════════ -->
+  <div x-show="activeTab === 'reports'" x-transition>
+    <div class="card p-5">
+      <h2 class="text-sm font-semibold mb-4" style="color: var(--text-ink);">{{ lang == 'ar' and 'بث بريدي' or 'Email Broadcast' }}</h2>
+      <form hx-post="/api/supervisor/broadcast" hx-target="#broadcast-result" class="space-y-4">
+        <div><label class="form-label">{{ lang == 'ar' and 'العنوان' or 'Subject' }}</label><input type="text" name="subject" class="form-input" required></div>
+        <div><label class="form-label">{{ lang == 'ar' and 'المحتوى' or 'Body' }}</label><textarea name="body" rows="5" class="form-input resize-none"></textarea></div>
+        <button type="submit" class="btn-primary">{{ lang == 'ar' and 'إرسال' or 'Send' }}</button>
+      </form>
+      <div id="broadcast-result" class="mt-3"></div>
+    </div>
+  </div>
+
+  <!-- ── Add Agent Modal ── -->
+  <div x-show="agentModal" x-transition class="modal-overlay">
+    <div class="modal-box" @click.outside="agentModal = false">
+      <h3 class="text-base font-bold mb-4" style="color: var(--text-ink);">{{ t('sup.add_agent', lang=lang) }}</h3>
+      <form hx-post="/api/supervisor/agents" hx-target="#agents-table-body" hx-swap="innerHTML"
+            @htmx:after-request="if(event.detail.successful) agentModal = false" class="space-y-3">
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="form-label">{{ lang == 'ar' and 'الاسم (عربي)' or 'Name (AR)' }}</label><input type="text" name="full_name_ar" class="form-input" required></div>
+          <div><label class="form-label">{{ lang == 'ar' and 'الاسم (إنجليزي)' or 'Name (EN)' }}</label><input type="text" name="full_name_en" class="form-input"></div>
+          <div><label class="form-label">{{ t('auth.username', lang=lang) }}</label><input type="text" name="username" class="form-input" required></div>
+          <div><label class="form-label">{{ lang == 'ar' and 'كلمة المرور' or 'Password' }}</label><input type="password" name="password" class="form-input" placeholder="{{ lang == 'ar' and 'كلمة مرور مؤقتة' or 'Temporary password' }}" required></div>
+          <div><label class="form-label">{{ lang == 'ar' and 'البريد' or 'Email' }}</label><input type="email" name="email" class="form-input"></div>
+          <div><label class="form-label">{{ lang == 'ar' and 'الجوال' or 'Phone' }}</label><input type="tel" name="phone" class="form-input" dir="ltr"></div>
+        </div>
+        <div class="flex gap-3 mt-4">
+          <button type="submit" class="btn-primary flex-1 justify-center">{{ t('app.save', lang=lang) }}</button>
+          <button type="button" @click="agentModal = false" class="btn-secondary">{{ t('app.cancel', lang=lang) }}</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+</div>
+
+<script>
+window._branchData = {{ branches_json | safe }};
+function branchManager() {
+  return {
+    branches: window._branchData || [],
+    filteredBranches: [],
+    search: '', statusFilter: 'all', regionFilter: 'all', onlyWithEmployees: false,
+    showBranchModal: false, editingBranch: null, branchForm: {}, branchError: '', savingBranch: false,
+    showEmployeesPanel: false, selectedBranch: null, employees: [], empSearch: '',
+    showEmployeeModal: false, editingEmployee: null, empForm: {}, empError: '', savingEmployee: false,
+    importMsg: '', importOk: false,
+
+    init() { this.filteredBranches = this.branches; },
+    filterBranches() {
+      var self = this, s = self.search.toLowerCase();
+      self.filteredBranches = self.branches.filter(function(b) {
+        var ms = !s
+          || (b.name_ar||'').toLowerCase().indexOf(s)>=0
+          || (b.name_en||'').toLowerCase().indexOf(s)>=0
+          || (b.code||'').toLowerCase().indexOf(s)>=0
+          || (b.city_ar||'').toLowerCase().indexOf(s)>=0
+          || (b.city_en||'').toLowerCase().indexOf(s)>=0
+          || (b.region_ar||'').toLowerCase().indexOf(s)>=0
+          || (b.region_en||'').toLowerCase().indexOf(s)>=0
+          || (b.phone||'').toLowerCase().indexOf(s)>=0
+          || (b.email||'').toLowerCase().indexOf(s)>=0;
+        var mst = self.statusFilter==='all' || (self.statusFilter==='active'&&b.is_active) || (self.statusFilter==='inactive'&&!b.is_active);
+        var branchRegion = (b.region_{{ lang }} || b.region_ar || b.region_en || '');
+        var mr = self.regionFilter === 'all' || branchRegion === self.regionFilter;
+        var me = !self.onlyWithEmployees || (b.employee_count || 0) > 0;
+        return ms && mst && mr && me;
+      });
+    },
+    get filteredEmployees() {
+      var s = this.empSearch.toLowerCase();
+      if (!s) return this.employees;
+      return this.employees.filter(function(e) { return (e.full_name_ar||'').toLowerCase().indexOf(s)>=0 || (e.full_name_en||'').toLowerCase().indexOf(s)>=0 || (e.employee_id||'').toLowerCase().indexOf(s)>=0 || (e.phone||'').indexOf(s)>=0; });
+    },
+    openBranchModal() { this.editingBranch=null; this.branchForm={name_ar:'',name_en:'',code:'',city_ar:'',city_en:'',region_ar:'',region_en:'',phone:'',email:'',internal_notes:''}; this.branchError=''; this.showBranchModal=true; },
+    editBranch(b) { this.editingBranch=b; this.branchForm=JSON.parse(JSON.stringify(b)); this.branchError=''; this.showBranchModal=true; },
+    saveBranch() {
+      var self=this;
+      if(!self.branchForm.name_ar||!self.branchForm.name_en||!self.branchForm.code){self.branchError='{{ _name_code_req }}';return;}
+      self.savingBranch=true; self.branchError='';
+      var url=self.editingBranch?'/api/supervisor/branches/'+self.editingBranch.id:'/api/supervisor/branches';
+      fetch(url,{method:self.editingBranch?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(self.branchForm)})
+      .then(function(r){return r.json();}).then(function(d){
+        if(d.ok){
+          if(self.editingBranch){
+            Object.assign(self.editingBranch, self.branchForm);
+          }else{
+            var newBranch = Object.assign({id:d.id,is_active:true,employee_count:0}, self.branchForm);
+            self.branches.unshift(newBranch);
+          }
+          self.filterBranches();
+          self.showBranchModal=false;
+        }else{
+          self.branchError=d.detail||'Error';
+        }
+        self.savingBranch=false;
+      })
+      .catch(function(){self.savingBranch=false;self.branchError='Error';});
+    },
+    toggleBranch(b) {
+      if(!confirm('{{ _sure_lbl }}'))return;
+      fetch('/api/supervisor/branches/'+b.id+'/toggle',{method:'POST'}).then(function(r){return r.json();}).then(function(d){if(d.ok)location.reload();});
+    },
+    viewEmployees(branch) {
+      var self=this; self.selectedBranch=branch; self.employees=[]; self.empSearch=''; self.showEmployeesPanel=true;
+      fetch('/api/supervisor/branches/'+branch.id+'/employees').then(function(r){return r.json();}).then(function(d){self.employees=d.employees||[];});
+    },
+    quickAddEmployee(branch) {
+      var self=this;
+      self.viewEmployees(branch);
+      setTimeout(function(){ self.openEmployeeModal(); }, 200);
+    },
+    openEmployeeModal() { this.editingEmployee=null; this.empForm={full_name_ar:'',full_name_en:'',employee_id:'',phone:'',email:'',position_ar:'',position_en:'',preferred_language:'ar'}; this.empError=''; this.showEmployeeModal=true; },
+    editEmployee(e) { this.editingEmployee=e; this.empForm=JSON.parse(JSON.stringify(e)); this.empError=''; this.showEmployeeModal=true; },
+    duplicateEmployee(e) {
+      this.editingEmployee = null;
+      this.empForm = JSON.parse(JSON.stringify(e));
+      this.empForm.employee_id = '';
+      this.empError = '';
+      this.showEmployeeModal = true;
+    },
+    saveEmployee() {
+      var self=this;
+      if(!self.empForm.full_name_ar||!self.empForm.employee_id){self.empError='{{ _name_id_req }}';return;}
+      self.savingEmployee=true; self.empError='';
+      var bid=self.selectedBranch.id;
+      var url=self.editingEmployee?'/api/supervisor/branches/'+bid+'/employees/'+self.editingEmployee.id:'/api/supervisor/branches/'+bid+'/employees';
+      fetch(url,{method:self.editingEmployee?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(self.empForm)})
+      .then(function(r){return r.json();}).then(function(d){if(d.ok){self.showEmployeeModal=false;self.viewEmployees(self.selectedBranch);}else{self.empError=d.detail||'Error';}self.savingEmployee=false;})
+      .catch(function(){self.savingEmployee=false;self.empError='Error';});
+    },
+    toggleEmployee(e) {
+      var self=this;
+      fetch('/api/supervisor/branches/'+self.selectedBranch.id+'/employees/'+e.id+'/toggle',{method:'POST'}).then(function(r){return r.json();}).then(function(d){if(d.ok)self.viewEmployees(self.selectedBranch);});
+    },
+    deleteEmployee(e) {
+      var self=this;
+      if(!confirm('{{ _sure_del }}'))return;
+      fetch('/api/supervisor/branches/'+self.selectedBranch.id+'/employees/'+e.id,{method:'DELETE'}).then(function(r){return r.json();}).then(function(d){if(d.ok)self.viewEmployees(self.selectedBranch);});
+    },
+    handleImportFile(ev) {
+      var self=this, file=ev.target.files[0]; if(!file)return;
+      var fd=new FormData(); fd.append('file',file);
+      fetch('/api/supervisor/branches/'+self.selectedBranch.id+'/employees/import',{method:'POST',body:fd})
+      .then(function(r){return r.json();}).then(function(d){if(d.ok){alert(d.message);self.viewEmployees(self.selectedBranch);}else{alert(d.detail||'Error');}ev.target.value='';}).catch(function(){ev.target.value='';});
+    },
+    importBulkExcel(ev) {
+      var self=this, file=ev.target.files[0]; if(!file)return;
+      self.importMsg=''; self.importOk=false;
+      var fd=new FormData(); fd.append('file',file);
+      fetch('/api/supervisor/branches/import',{method:'POST',body:fd})
+      .then(function(r){return r.json();}).then(function(d){
+        self.importOk=!!d.ok; self.importMsg=d.message||d.detail||'Error';
+        if(d.ok) setTimeout(function(){location.reload();},2000);
+        ev.target.value='';
+      }).catch(function(){self.importMsg='Error';ev.target.value='';});
+    },
+    exportBranches() { window.open('/api/supervisor/branches/export','_blank'); },
+    exportAllBranchesWithEmployees() { window.open('/api/supervisor/branches/export-with-employees','_blank'); },
+    exportSelectedBranchEmployees() {
+      if (!this.selectedBranch || !this.selectedBranch.id) return;
+      window.open('/api/supervisor/branches/' + this.selectedBranch.id + '/employees/export', '_blank');
+    }
+  };
+}
+</script>
+{% endblock %}

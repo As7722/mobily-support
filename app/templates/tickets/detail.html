@@ -1,0 +1,1850 @@
+{% extends "base_app.html" %}
+{% block title %}{{ ticket.ticket_number }} — موبايلي{% endblock %}
+{% block page_title %}{{ ticket.ticket_number }}{% endblock %}
+
+{% block extra_head %}
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   TICKET DETAIL — Zendesk-style layout
+   Left: Customer request + Conversation + Reply
+   Right: Properties + Activity log + KB
+═══════════════════════════════════════════════════════════════ */
+
+/* ── Page wrapper ─────────────────────────────────── */
+.td-page { min-height: calc(100vh - 56px); background: var(--bg-base); }
+
+/* ── Action bar (top compact strip) ──────────────── */
+.td-actionbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 20px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-color);
+  position: sticky; top: 56px; z-index: 60;
+}
+/* Scrollable inner wrapper — overflow-y visible so dropdowns show below */
+.td-actionbar-inner {
+  display: flex; align-items: center; gap: 8px;
+  overflow-x: auto; overflow-y: visible;
+  scrollbar-width: thin; flex: 1;
+}
+.td-actionbar-inner::-webkit-scrollbar { height: 3px; }
+.td-actionbar-inner::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 99px; }
+.td-ticket-num {
+  font-family: monospace; font-size: 12px; font-weight: 700;
+  color: #00AEEF; background: rgba(0,174,239,0.1);
+  padding: 3px 10px; border-radius: 6px; border: 1px solid rgba(0,174,239,0.25);
+}
+.td-subject {
+  font-size: 14px; font-weight: 700; color: var(--text-ink);
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Priority bar under action bar */
+.td-prio-bar {
+  height: 3px;
+  background: var(--bg-muted);
+  position: sticky; top: calc(56px + 49px); z-index: 99;
+}
+.td-prio-bar.critical { background: #EF4444; }
+.td-prio-bar.high     { background: #F97316; }
+.td-prio-bar.medium   { background: #EAB308; }
+.td-prio-bar.low      { background: #22C55E; }
+
+/* ── Two-column layout ────────────────────────────── */
+.td-body {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  min-height: calc(100vh - 112px);
+  align-items: start;
+}
+@media (max-width: 1080px) {
+  .td-body { grid-template-columns: 1fr; }
+  .td-sidebar { display: none; }
+}
+
+/* ── LEFT MAIN ────────────────────────────────────── */
+.td-main { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+
+/* ── CUSTOMER ORIGINAL REQUEST CARD ──────────────── */
+.td-request-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.td-request-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-surface);
+}
+.td-request-avatar {
+  width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+  background: linear-gradient(135deg, #F59E0B, #D97706);
+  color: #fff; font-size: 14px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.td-request-sender-name {
+  font-size: 14px; font-weight: 700; color: var(--text-ink); line-height: 1.2;
+}
+.td-request-meta {
+  font-size: 11px; color: var(--text-faint); margin-top: 2px;
+}
+.td-request-body {
+  padding: 18px;
+}
+.td-request-text {
+  font-size: 14px; line-height: 1.7; color: var(--text-ink);
+  white-space: pre-wrap; word-break: break-word;
+}
+.td-request-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 99px;
+  background: rgba(245,158,11,0.12); color: #D97706;
+  border: 1px solid rgba(245,158,11,0.25);
+}
+.td-attachments {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-surface);
+}
+.td-attach-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border-radius: 8px; font-size: 12px; font-weight: 500;
+  background: var(--bg-muted); color: var(--text-ink);
+  border: 1px solid var(--border-color); text-decoration: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+.td-attach-chip:hover { border-color: #00AEEF; background: rgba(0,174,239,0.05); }
+
+/* ── CONVERSATION DIVIDER ─────────────────────────── */
+.conv-divider {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--text-faint);
+}
+.conv-divider::before, .conv-divider::after {
+  content: ''; flex: 1; height: 1px; background: var(--border-color);
+}
+
+/* ── CONVERSATION THREAD ─────────────────────────── */
+.td-conversation { display: flex; flex-direction: column; gap: 12px; }
+
+/* ── MESSAGE BUBBLE BASE ─────────────────────────── */
+.msg-bubble {
+  border-radius: 12px; overflow: hidden;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+}
+/* Agent reply (external) */
+.msg-agent {
+  border-left: 3px solid #2563EB;
+}
+.dark .msg-agent { border-left-color: #3B82F6; }
+/* Customer reply */
+.msg-customer {
+  border-left: 3px solid #F59E0B;
+  background: rgba(245,158,11,0.03);
+}
+.dark .msg-customer { border-left-color: #FBBF24; background: rgba(245,158,11,0.04); }
+/* Internal note */
+.msg-internal {
+  border-left: 3px solid #7C3AED;
+  background: rgba(124,58,237,0.04);
+}
+.dark .msg-internal { border-left-color: #8B5CF6; background: rgba(139,92,246,0.06); }
+
+.msg-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-surface);
+}
+.msg-avatar {
+  width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+  font-size: 12px; font-weight: 700; color: #fff;
+  display: flex; align-items: center; justify-content: center;
+}
+.msg-avatar-agent    { background: #2563EB; }
+.msg-avatar-customer { background: #F59E0B; }
+.msg-avatar-internal { background: #7C3AED; }
+.msg-sender {
+  font-size: 13px; font-weight: 600; color: var(--text-ink); line-height: 1.2;
+}
+.msg-time { font-size: 11px; color: var(--text-faint); }
+.msg-body { padding: 14px 16px; }
+.msg-text {
+  font-size: 14px; line-height: 1.7; color: var(--text-ink);
+  white-space: pre-wrap; word-break: break-word; margin: 0;
+}
+.msg-attachment {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-surface);
+}
+.msg-attach-link {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; color: #00AEEF; text-decoration: none; font-weight: 500;
+}
+.msg-attach-link:hover { text-decoration: underline; }
+
+/* Badges on messages */
+.badge-internal {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-weight: 700;
+  padding: 2px 7px; border-radius: 99px;
+  background: rgba(124,58,237,0.12); color: #7C3AED;
+  border: 1px solid rgba(124,58,237,0.25);
+}
+.badge-customer-tag {
+  font-size: 10px; font-weight: 700;
+  padding: 2px 7px; border-radius: 99px;
+  background: rgba(245,158,11,0.12); color: #D97706;
+  border: 1px solid rgba(245,158,11,0.25);
+}
+.badge-agent-tag {
+  font-size: 10px; font-weight: 700;
+  padding: 2px 7px; border-radius: 99px;
+  background: rgba(37,99,235,0.1); color: #2563EB;
+  border: 1px solid rgba(37,99,235,0.2);
+}
+
+/* ── EMPTY CONVERSATION ───────────────────────────── */
+.empty-conversation {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 40px 20px; text-align: center; gap: 8px;
+  color: var(--text-faint);
+}
+.empty-conversation p { font-size: 13px; }
+
+/* ── REPLY BOX ────────────────────────────────────── */
+.td-reply-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.td-reply-tabs {
+  display: flex; align-items: center; gap: 4px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-surface);
+}
+.rtab {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 12px; border-radius: 7px; font-size: 13px; font-weight: 600;
+  cursor: pointer; border: none; transition: all 0.15s;
+  background: transparent; color: var(--text-muted);
+}
+.rtab:hover { background: var(--bg-muted); color: var(--text-ink); }
+.rtab-ext-active {
+  background: #2563EB; color: #fff;
+}
+.rtab-int-active {
+  background: #7C3AED; color: #fff;
+}
+.td-reply-form { padding: 14px; }
+.td-reply-textarea {
+  width: 100%; resize: none; outline: none;
+  background: var(--input-bg); color: var(--text-ink);
+  border: 1px solid var(--border-color); border-radius: 8px;
+  padding: 10px 12px; font-size: 14px; font-family: inherit;
+  line-height: 1.6; transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+.td-reply-textarea:focus { border-color: #00AEEF; }
+.td-reply-textarea.internal-mode { border-color: rgba(124,58,237,0.4); background: rgba(124,58,237,0.03); }
+.td-reply-actions {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 10px; gap: 12px;
+}
+.td-send-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 20px; border-radius: 8px; font-size: 14px; font-weight: 700;
+  color: #fff; border: none; cursor: pointer; transition: background 0.15s;
+  background: #00AEEF;
+}
+.td-send-btn:hover { background: #0095CC; }
+.td-send-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.td-send-btn.internal-mode { background: #7C3AED; }
+.td-send-btn.internal-mode:hover { background: #6D28D9; }
+.td-attach-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; font-weight: 500; color: var(--text-muted);
+  background: none; border: none; cursor: pointer; transition: color 0.15s;
+}
+.td-attach-btn:hover { color: var(--text-ink); }
+.td-draft-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-weight: 700;
+  padding: 2px 8px; border-radius: 99px;
+  background: var(--bg-muted); color: var(--text-muted);
+}
+
+/* ── ACTION BUTTONS ───────────────────────────────── */
+.abar-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 12px; border-radius: 7px; font-size: 12px; font-weight: 600;
+  background: var(--bg-surface); color: var(--text-muted);
+  border: 1px solid var(--border-color); cursor: pointer; transition: all 0.15s;
+  white-space: nowrap; flex-shrink: 0;
+}
+.abar-btn:hover { background: var(--bg-muted); color: var(--text-ink); border-color: var(--text-faint); }
+.abar-btn-resolve {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 14px; border-radius: 7px; font-size: 12px; font-weight: 700;
+  background: #10B981; color: #fff; border: none; cursor: pointer;
+  white-space: nowrap; flex-shrink: 0;
+}
+.abar-btn-resolve:hover { background: #059669; }
+.abar-btn-close {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 14px; border-radius: 7px; font-size: 12px; font-weight: 700;
+  background: #EF4444; color: #fff; border: none; cursor: pointer;
+  white-space: nowrap; flex-shrink: 0;
+}
+.abar-btn-close:hover { background: #DC2626; }
+
+/* ── STATUS DROPDOWN ─────────────────────────────── */
+.status-trigger { position: relative; display: inline-block; flex-shrink: 0; }
+.status-dropdown {
+  position: fixed;
+  z-index: 9999; min-width: 210px;
+  background: var(--bg-card); border: 1px solid var(--border-color);
+  border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+  overflow: hidden;
+}
+.status-opt {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 16px; font-size: 13px; cursor: pointer;
+  color: var(--text-ink); background: none; border: none;
+  width: 100%; text-align: start; transition: background 0.1s;
+}
+.status-opt:hover { background: var(--bg-surface); }
+.status-opt + .status-opt { border-top: 1px solid var(--border-color); }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+/* ── STATUS BADGE (in action bar) ────────────────── */
+.status-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; font-weight: 700; padding: 3px 10px;
+  border-radius: 99px; border: 1px solid transparent;
+}
+.sb-open     { background: rgba(245,158,11,0.12); color: #D97706; border-color: rgba(245,158,11,0.3); }
+.sb-new      { background: rgba(37,99,235,0.1);   color: #2563EB; border-color: rgba(37,99,235,0.25); }
+.sb-resolved, .sb-closed { background: rgba(16,185,129,0.1); color: #059669; border-color: rgba(16,185,129,0.25); }
+.sb-pending_customer, .sb-pending_3rd { background: rgba(124,58,237,0.1); color: #7C3AED; border-color: rgba(124,58,237,0.25); }
+
+/* ── PRIORITY BADGE ──────────────────────────────── */
+.prio-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 700; padding: 3px 9px;
+  border-radius: 99px;
+}
+.pb-critical { background: rgba(239,68,68,0.1);   color: #DC2626; }
+.pb-high     { background: rgba(249,115,22,0.1);   color: #EA580C; }
+.pb-medium   { background: rgba(234,179,8,0.1);    color: #CA8A04; }
+.pb-low      { background: rgba(34,197,94,0.1);    color: #16A34A; }
+
+/* ── SIDEBAR ─────────────────────────────────────── */
+.td-sidebar {
+  border-inline-start: 1px solid var(--border-color);
+  background: var(--bg-card);
+  position: sticky; top: 56px;
+  height: calc(100vh - 56px);
+  overflow-y: auto;
+  display: flex; flex-direction: column;
+}
+
+/* ── SIDEBAR SECTION ─────────────────────────────── */
+.td-section {
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+.td-section-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px;
+  background: var(--bg-surface);
+  cursor: pointer; user-select: none;
+}
+.td-section-title {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--text-muted);
+}
+.td-section-body { padding: 12px 16px; }
+
+/* ── PROPERTIES ──────────────────────────────────── */
+.prop-item {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 8px; padding: 7px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+.prop-item:last-child { border-bottom: none; }
+.prop-k {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--text-faint); flex-shrink: 0; padding-top: 2px;
+}
+.prop-v {
+  font-size: 13px; font-weight: 500; color: var(--text-ink); text-align: end;
+}
+.prop-v.mono { font-family: monospace; font-size: 12px; color: #00AEEF; }
+
+/* ── SLA BAR ─────────────────────────────────────── */
+.sla-progress { margin-top: 6px; }
+.sla-track {
+  height: 5px; border-radius: 99px; background: var(--bg-muted); overflow: hidden;
+}
+.sla-fill { height: 100%; border-radius: 99px; transition: width 0.5s; }
+
+/* ── ACTIVITY LOG ────────────────────────────────── */
+.td-activity { padding: 0 16px 12px; display: flex; flex-direction: column; gap: 0; }
+.activity-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+.activity-item:last-child { border-bottom: none; }
+.activity-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 4px;
+}
+.dot-blue   { background: #3B82F6; }
+.dot-green  { background: #10B981; }
+.dot-amber  { background: #F59E0B; }
+.dot-red    { background: #EF4444; }
+.dot-orange { background: #F97316; }
+.dot-gray   { background: #94A3B8; }
+.activity-text { font-size: 12px; color: var(--text-ink); line-height: 1.4; }
+.activity-meta { font-size: 10px; color: var(--text-faint); margin-top: 2px; }
+
+/* ── KB SEARCH ───────────────────────────────────── */
+.td-kb-list { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 6px; }
+.kb-article-card {
+  display: block; padding: 9px 12px; border-radius: 8px; text-decoration: none;
+  border: 1px solid var(--border-color); transition: all 0.15s;
+}
+.kb-article-card:hover { border-color: #00AEEF; background: rgba(0,174,239,0.03); }
+.kb-article-title { font-size: 12px; font-weight: 600; color: var(--text-ink); margin-bottom: 2px; line-height: 1.4; }
+.kb-article-excerpt { font-size: 11px; color: var(--text-faint); line-height: 1.3; }
+
+/* ── CANNED RESPONSE ─────────────────────────────── */
+.canned-picker {
+  border-radius: 8px; overflow: hidden;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+  margin-bottom: 8px;
+}
+.canned-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px; font-size: 12px;
+  background: none; border: none; width: 100%; text-align: start;
+  color: var(--text-ink); cursor: pointer; transition: background 0.1s;
+  border-bottom: 1px solid var(--border-color);
+}
+.canned-item:last-child { border-bottom: none; }
+.canned-item:hover { background: var(--bg-surface); }
+.canned-kbd {
+  font-family: monospace; font-size: 10px;
+  padding: 1px 5px; border-radius: 4px;
+  background: var(--bg-muted); color: var(--text-muted);
+  border: 1px solid var(--border-color); flex-shrink: 0;
+}
+
+/* ── MODAL ───────────────────────────────────────── */
+.td-modal-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,0.65);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.td-modal-box {
+  background: var(--bg-card); border: 1px solid var(--border-color);
+  border-radius: 14px; padding: 24px; width: 100%; max-width: 440px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  animation: popIn 0.18s cubic-bezier(0.34,1.56,0.64,1) both;
+}
+@keyframes popIn { from { opacity:0; transform:scale(0.92); } to { opacity:1; transform:scale(1); } }
+
+/* ── TIMELINE FILTER PILLS ───────────────────────── */
+.tlf-pill {
+  padding: 4px 14px; border-radius: 99px; font-size: 12px; font-weight: 600;
+  border: 1.5px solid var(--border-color); cursor: pointer;
+  background: transparent; color: var(--text-muted);
+  transition: all 0.15s;
+}
+.tlf-pill:hover { border-color: #00AEEF; color: #00AEEF; }
+.tlf-pill.tlf-active {
+  background: rgba(0,174,239,0.12); border-color: #00AEEF; color: #00AEEF;
+}
+/* ── MESSAGE TOGGLE (kept for legacy) ────────────── */
+.toggle-wrap { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.toggle-track {
+  width: 34px; height: 18px; border-radius: 99px; position: relative;
+  transition: background 0.2s;
+}
+.toggle-thumb {
+  position: absolute; top: 2px; inset-inline-start: 2px;
+  width: 14px; height: 14px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: transform 0.2s;
+}
+
+/* ── KEYFRAME ANIMATIONS ──────────────────────────── */
+@keyframes slideIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+.tl-anim { animation: slideIn 0.2s ease-out both; }
+</style>
+{% endblock %}
+
+{% block content %}
+<script>
+  window._cannedResponses = {{ canned_responses | tojson }};
+  window._kbArticles     = {{ kb_articles | tojson }};
+</script>
+<span id="_kbInitQuery" data-v="{{ ticket.category.name_ar if ticket.category else '' }}" class="hidden"></span>
+
+<div class="td-page"
+     x-data="{
+       showInternal: false,
+       replyMode: 'external',
+       replyText: '',
+       cannedOpen: false, cannedFilter: '',
+       cannedItems: window._cannedResponses || [],
+       activeModal: null,
+       statusOpen: false,
+       kbQuery: '',
+       kbArticles: window._kbArticles || [],
+       draftKey: 'draft_{{ ticket.id }}',
+       ticketVersion: {{ ticket.version }},
+       showDraftBadge: false,
+
+       init() {
+         const saved = localStorage.getItem(this.draftKey);
+         if (saved) { this.replyText = saved; this.showDraftBadge = true; }
+         setInterval(() => {
+           if (this.replyText) { localStorage.setItem(this.draftKey, this.replyText); this.showDraftBadge = true; }
+         }, 30000);
+         document.addEventListener('htmx:afterRequest', (e) => {
+           if (e.detail.successful && e.detail.requestConfig?.path?.includes('/reply')) {
+             const v = e.detail.xhr.getResponseHeader('X-Ticket-Version');
+             if (v) { this.ticketVersion = parseInt(v); document.querySelectorAll('input[name=version]').forEach(el => el.value = v); }
+             this.replyText = ''; this.showDraftBadge = false; localStorage.removeItem(this.draftKey);
+             this.$nextTick(() => splitTimeline());
+           }
+         });
+         this.$nextTick(() => splitTimeline());
+       },
+
+       insertCanned(c) { this.replyText = c; this.cannedOpen = false; },
+       get filteredCanned() {
+         const f = this.cannedFilter.replace('/','').toLowerCase();
+         return this.cannedItems.filter(c => c.shortcut.includes(f) || c.name.toLowerCase().includes(f));
+       },
+
+       /* ── Status change with 5-second undo ──────────────────────────── */
+       pendingStatus: null,
+       pendingStatusLabel: '',
+       pendingStatusTimer: null,
+       pendingStatusInterval: null,
+       statusCountdown: 8,
+
+       startStatusChange(ns, label) {
+         this.cancelStatusChange();          // cancel any previous pending
+         this.statusOpen = false;
+         this.pendingStatus = ns;
+         this.pendingStatusLabel = label;
+         this.statusCountdown = 8;
+         this.pendingStatusInterval = setInterval(() => {
+           this.statusCountdown -= 1;
+           if (this.statusCountdown <= 0) {
+             clearInterval(this.pendingStatusInterval);
+           }
+         }, 1000);
+         this.pendingStatusTimer = setTimeout(() => {
+           this._commitStatusChange();
+         }, 8000);
+       },
+
+       cancelStatusChange() {
+         clearTimeout(this.pendingStatusTimer);
+         clearInterval(this.pendingStatusInterval);
+         this.pendingStatus = null;
+         this.pendingStatusLabel = '';
+         this.statusCountdown = 8;
+       },
+
+       _commitStatusChange() {
+         clearInterval(this.pendingStatusInterval);
+         const ns = this.pendingStatus;
+         this.pendingStatus = null;
+         this.pendingStatusLabel = '';
+         if (!ns) return;
+         htmx.ajax('POST',
+           '/api/tickets/{{ ticket.id }}/status',
+           {
+             target: 'body',
+             swap: 'outerHTML',
+             values: { status: ns, version: this.ticketVersion }
+           }
+         );
+       }
+     }"
+     @keydown.escape="activeModal = null; cannedOpen = false; statusOpen = false; cancelStatusChange()">
+
+  <!-- ════ STATUS CHANGE UNDO TOAST ════════════════════════════════ -->
+  <!-- Backdrop -->
+  <div x-show="pendingStatus !== null"
+       x-transition:enter="transition ease-out duration-200"
+       x-transition:enter-start="opacity-0"
+       x-transition:enter-end="opacity-100"
+       x-transition:leave="transition ease-in duration-150"
+       x-transition:leave-start="opacity-100"
+       x-transition:leave-end="opacity-0"
+       @click="cancelStatusChange()"
+       style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9998;"
+       aria-hidden="true">
+  </div>
+  <!-- Toast card -->
+  <div x-show="pendingStatus !== null"
+       x-transition:enter="transition ease-out duration-200"
+       x-transition:enter-start="opacity-0 scale-95"
+       x-transition:enter-end="opacity-100 scale-100"
+       x-transition:leave="transition ease-in duration-150"
+       x-transition:leave-start="opacity-100 scale-100"
+       x-transition:leave-end="opacity-0 scale-95"
+       style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9999;min-width:340px;max-width:500px;"
+       role="status" aria-live="polite">
+    <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:10px;background:var(--bg-card,#1E2025);border:1px solid rgba(255,255,255,0.1);box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+      <!-- Countdown ring -->
+      <div style="position:relative;width:36px;height:36px;flex-shrink:0;">
+        <svg style="width:36px;height:36px;transform:rotate(-90deg);" viewBox="0 0 36 36">
+          <circle cx="18" cy="18" r="15" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="3"/>
+          <circle cx="18" cy="18" r="15" fill="none" stroke="#00AEEF" stroke-width="3"
+                  stroke-dasharray="94.2"
+                  :stroke-dashoffset="94.2 - (94.2 * statusCountdown / 8)"
+                  style="transition:stroke-dashoffset 1s linear;"/>
+        </svg>
+        <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#00AEEF;" x-text="statusCountdown"></span>
+      </div>
+      <!-- Message -->
+      <div style="flex:1;min-width:0;">
+        <p style="margin:0;font-size:13px;font-weight:600;color:var(--text-primary,#F1F5F9);">
+          {{ lang == 'ar' and 'تغيير الحالة إلى' or 'Changing status to' }}
+          <span style="color:#00AEEF;" x-text="pendingStatusLabel"></span>
+        </p>
+        <p style="margin:2px 0 0;font-size:11px;color:var(--text-muted,#94A3B8);">
+          {{ lang == 'ar' and 'سيتم التطبيق تلقائياً...' or 'Will apply automatically...' }}
+        </p>
+      </div>
+      <!-- Undo button -->
+      <button type="button"
+              @click="cancelStatusChange()"
+              style="flex-shrink:0;padding:6px 14px;border-radius:6px;border:1.5px solid rgba(239,68,68,0.4);background:rgba(239,68,68,0.08);color:#F87171;font-size:12px;font-weight:700;cursor:pointer;transition:all 0.15s;"
+              @mouseenter="$el.style.background='rgba(239,68,68,0.18)'"
+              @mouseleave="$el.style.background='rgba(239,68,68,0.08)'">
+        {{ lang == 'ar' and '↩ تراجع' or '↩ Undo' }}
+      </button>
+    </div>
+  </div>
+
+  <!-- ════ STICKY ACTION BAR ════════════════════════════════════════ -->
+  <div class="td-actionbar">
+    <!-- Ticket # -->
+    <span class="td-ticket-num">{{ ticket.ticket_number }}</span>
+
+    <!-- Status badge -->
+    <span class="status-badge sb-{{ ticket.status }}">
+      <span class="h-1.5 w-1.5 rounded-full
+        {% if ticket.status in ['resolved','closed'] %}bg-emerald-500
+        {% elif ticket.status == 'new' %}bg-blue-500
+        {% elif ticket.status in ['pending_customer','pending_3rd'] %}bg-violet-500
+        {% else %}bg-amber-500{% endif %}"></span>
+      {{ t('ticket.status.' ~ ticket.status, lang=lang) }}
+    </span>
+
+    <!-- Priority badge -->
+    <span class="prio-badge pb-{{ ticket.priority }}">
+      {{ t('ticket.priority.' ~ ticket.priority, lang=lang) }}
+    </span>
+
+    <!-- Subject -->
+    <span class="td-subject">{{ ticket.subject or t('ticket.no_subject', lang=lang) }}</span>
+
+    <!-- Collision banner -->
+    <div id="collision-banner"></div>
+
+    <!-- Actions (scrollable, overflow-visible for dropdowns) -->
+    <span style="width:1px;height:20px;background:var(--border-color);flex-shrink:0;"></span>
+    <div class="td-actionbar-inner">
+
+    {# ── Determine context variables ── #}
+    {% set cur_user = request.state.user or {} %}
+    {% set cur_role = cur_user.get('role','employee') %}
+    {% set is_sup   = cur_role in ('supervisor','manager','admin') %}
+    {% set is_new_unassigned = (ticket.status == 'new' and not ticket.assigned_to) %}
+    {# Employees cannot act on pending_customer tickets — awaiting customer reply #}
+    {% set locked_pending = (ticket.status == 'pending_customer' and not is_sup) %}
+    {# Employees cannot escalate/resolve pending_3rd — but CAN return it to open #}
+    {% set locked_3rd = (ticket.status == 'pending_3rd' and not is_sup) %}
+
+    {% if locked_pending %}
+      {# ── PENDING CUSTOMER: employee cannot act — show info notice ── #}
+      <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:7px;font-size:12px;font-weight:600;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.25);color:#F59E0B;flex-shrink:0;">
+        <svg style="width:14px;height:14px;flex-shrink:0;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        {{ lang == 'ar' and 'في انتظار رد العميل — يُحل تلقائياً بعد 48 ساعة' or 'Awaiting customer reply — auto-resolves in 48h' }}
+      </span>
+
+    {% elif is_new_unassigned %}
+      {# ── UNASSIGNED NEW TICKET: only show Claim button ── #}
+      <button hx-post="/api/dashboard/claim/{{ ticket.id }}"
+              hx-target="body" hx-swap="outerHTML"
+              class="abar-btn-resolve"
+              style="background:#8B5CF6;">
+        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11.5V14m0-2.5v-6a1.5 1.5 0 113 0m-3 6a1.5 1.5 0 00-3 0v2a7.5 7.5 0 0015 0v-5a1.5 1.5 0 00-3 0m-6-3V11m0-5.5v-1a1.5 1.5 0 013 0v1m0 0V11m0-5.5a1.5 1.5 0 013 0v3m0 0V11"/>
+        </svg>
+        {{ t('dash.claim', lang=lang) }}
+      </button>
+
+    {% else %}
+      {# ── ASSIGNED / ACTIVE TICKET: full action bar ── #}
+
+      {# Status dropdown — employees cannot change status when pending_customer #}
+      {% set transitions = {
+        'open':            ['pending_customer','pending_3rd'],
+        'pending_customer':['open'],
+        'pending_3rd':     ['open'],
+        'resolved':        ['closed','open']
+      } %}
+      {% if ticket.status in transitions and transitions[ticket.status] and not locked_pending %}
+      <div class="status-trigger" x-data="{ ddRect: null }">
+        <button @click.stop="statusOpen = !statusOpen; if(statusOpen){ ddRect = $el.getBoundingClientRect(); }" class="abar-btn">
+          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+          {{ t('ticket.status.label', lang=lang) }}
+          <svg class="h-3 w-3 transition-transform" :style="statusOpen ? 'transform:rotate(180deg)' : ''"
+               fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+          </svg>
+        </button>
+        <div class="status-dropdown" x-show="statusOpen" @click.outside="statusOpen=false"
+             x-transition:enter="transition ease-out duration-100"
+             x-transition:enter-start="opacity-0 scale-95"
+             x-transition:enter-end="opacity-100 scale-100"
+             :style="ddRect ? 'top:' + (ddRect.bottom + 5) + 'px; left:' + ddRect.left + 'px;' : ''"
+             style="display:none">
+          {% for ns in transitions[ticket.status] %}
+          <button type="button"
+                  @click.stop="startStatusChange('{{ ns }}', '{{ t('ticket.status.' ~ ns, lang=lang) }}')"
+                  class="status-opt">
+            <span class="status-dot
+              {% if ns in ['resolved','closed'] %}dot-green bg-emerald-500
+              {% elif ns == 'open' %}bg-amber-500
+              {% elif ns in ['pending_customer','pending_3rd'] %}bg-violet-500
+              {% else %}bg-blue-500{% endif %}"></span>
+            {{ t('ticket.status.' ~ ns, lang=lang) }}
+          </button>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+
+      {# Transfer — supervisor+ only #}
+      {% if is_sup %}
+      <button @click="activeModal='transfer'" class="abar-btn">
+        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/>
+        </svg>{{ t('ticket.actions.transfer', lang=lang) }}
+      </button>
+      {% endif %}
+
+      {# pending_3rd notice — shown inline for employee; status dropdown still works #}
+      {% if locked_3rd %}
+      <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:7px;font-size:12px;font-weight:600;background:rgba(124,58,237,0.1);border:1px solid rgba(124,58,237,0.25);color:#7C3AED;flex-shrink:0;white-space:nowrap;">
+        <svg style="width:14px;height:14px;flex-shrink:0;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+        </svg>
+        {{ lang == 'ar' and 'في انتظار طرف ثالث — يمكنك إعادتها للمعالجة' or 'Awaiting 3rd party — you can return it to open' }}
+      </span>
+      {% endif %}
+
+      {# Escalate — hidden from employees on pending_customer or pending_3rd #}
+      {% if not locked_pending and not locked_3rd %}
+      <button @click="activeModal='escalate'" class="abar-btn">
+        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"/>
+        </svg>{{ t('ticket.actions.escalate', lang=lang) }}
+      </button>
+      {% endif %}
+
+      {# Supervisor+ only actions #}
+      {% if is_sup %}
+      <button @click="activeModal='return_ticket'" class="abar-btn" style="color:#F59E0B;border-color:rgba(245,158,11,0.3);">
+        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3"/>
+        </svg>{{ t('ticket.actions.return_ticket', lang=lang) }}
+      </button>
+
+      <button @click="activeModal='split'" class="abar-btn">
+        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+        </svg>{{ t('ticket.actions.split', lang=lang) }}
+      </button>
+
+      <button @click="activeModal='merge'" class="abar-btn">
+        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/>
+        </svg>{{ lang == 'ar' and 'دمج' or 'Merge' }}
+      </button>
+
+      {% if not ticket.sla_paused_at %}
+      <button @click="activeModal='pause_sla'" class="abar-btn">
+        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>{{ t('ticket.actions.pause_sla', lang=lang) }}
+      </button>
+      {% else %}
+      <button hx-post="/api/tickets/{{ ticket.id }}/resume-sla" hx-target="body" hx-swap="outerHTML"
+              class="abar-btn" style="color:#00AEEF;border-color:rgba(0,174,239,0.3);">
+        ▶ {{ t('ticket.actions.resume_sla', lang=lang) }}
+      </button>
+      {% endif %}
+      {% endif %}
+
+      {# Resolve / Close — employees cannot resolve when pending_customer or pending_3rd #}
+      {% if ticket.status not in ['resolved','closed','archived'] and not locked_pending and not locked_3rd %}
+      <button @click="activeModal='resolve'" class="abar-btn-resolve">
+        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>{{ t('ticket.actions.resolve', lang=lang) }}
+      </button>
+      {% endif %}
+      {% if ticket.status == 'resolved' %}
+      <button @click="activeModal='close'" class="abar-btn-close">
+        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>{{ t('ticket.actions.close', lang=lang) }}
+      </button>
+      {% endif %}
+
+    {% endif %}{# end if locked_pending / is_new_unassigned / else #}
+    </div>{# end td-actionbar-inner #}
+  </div>
+
+  <!-- Priority bar -->
+  <div class="td-prio-bar {{ ticket.priority }}"></div>
+
+  <!-- ════ TWO-COLUMN BODY ════════════════════════════════════════ -->
+  <div class="td-body">
+
+    <!-- ╔══ LEFT: Main conversation ══╗ -->
+    <div class="td-main">
+
+      <!-- ── SLA WARNING BANNER ─────────────────────────── -->
+      {% if ticket.sla_deadline and ticket.status not in ['resolved','closed','archived'] %}
+      {% set sla_pct = [sla_ratio * 100, 100]|min|int %}
+      <div class="flex items-center gap-4 rounded-xl px-4 py-3 tl-anim
+        {% if ticket.sla_breached %}bg-red-50 dark:bg-red-950/25 border border-red-200 dark:border-red-800
+        {% elif sla_pct >= 75 %}bg-amber-50 dark:bg-amber-950/25 border border-amber-200 dark:border-amber-800
+        {% else %}bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800{% endif %}">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs font-bold uppercase tracking-wider
+              {% if ticket.sla_breached %}text-red-700 dark:text-red-400
+              {% elif sla_pct >= 75 %}text-amber-700 dark:text-amber-400
+              {% else %}text-emerald-700 dark:text-emerald-400{% endif %}">
+              SLA {% if ticket.sla_paused_at %}— {{ t('sla.paused', lang=lang) }}{% endif %}
+            </span>
+            <span class="text-xs font-semibold
+              {% if ticket.sla_breached %}text-red-600{% elif sla_pct >= 75 %}text-amber-600{% else %}text-emerald-600{% endif %}">
+              {% if ticket.sla_breached %}⚠ {{ t('ticket.sla_breached', lang=lang) }}{% else %}{{ sla_remaining }}{% endif %}
+            </span>
+          </div>
+          <div class="sla-track">
+            <div class="sla-fill {% if sla_pct >= 100 %}bg-red-500{% elif sla_pct >= 75 %}bg-amber-500{% else %}bg-emerald-500{% endif %}"
+                 style="width:{{ sla_pct }}%"></div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- ── CUSTOMER ORIGINAL REQUEST ─────────────────── -->
+      <div class="td-request-card tl-anim">
+        <div class="td-request-header">
+          <div class="flex items-center gap-12px" style="gap:12px">
+            <div class="td-request-avatar">
+              {{ ticket.submitter_name[0]|upper if ticket.submitter_name else 'ع' }}
+            </div>
+            <div>
+              <p class="td-request-sender-name">
+                {{ ticket.submitter_name or t('timeline.customer', lang=lang) }}
+                {% if ticket.submitter_phone %}<span class="td-request-meta ms-2 dir-ltr">{{ ticket.submitter_phone }}</span>{% endif %}
+              </p>
+              <p class="td-request-meta">
+                {{ format_date(ticket.created_at, lang) }}
+                {% if ticket.category %} · {{ bl(ticket.category, 'name', lang) }}{% endif %}
+              </p>
+            </div>
+          </div>
+          <div class="flex items-center gap-8px" style="gap:8px">
+            <span class="td-request-tag">
+              <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+              </svg>
+              {{ t('timeline.customer', lang=lang) if t('timeline.customer', lang=lang) != 'timeline.customer' else 'من: العميل' }}
+            </span>
+            <span class="prio-badge pb-{{ ticket.priority }}">{{ t('ticket.priority.' ~ ticket.priority, lang=lang) }}</span>
+          </div>
+        </div>
+
+        {% if ticket.subject %}
+        <div class="px-4 py-3" style="border-bottom: 1px solid var(--border-color);">
+          <h2 class="text-lg font-bold" style="color: var(--text-ink);">{{ ticket.subject }}</h2>
+        </div>
+        {% endif %}
+
+        <div class="td-request-body">
+          {% if ticket.description %}
+          <p class="td-request-text">{{ ticket.description }}</p>
+          {% else %}
+          <p class="text-sm italic" style="color: var(--text-faint);">{{ t('ticket.no_subject', lang=lang) if t('ticket.no_subject', lang=lang) != 'ticket.no_subject' else 'لا يوجد وصف' }}</p>
+          {% endif %}
+        </div>
+
+        {% if ticket.attachments %}
+        <div class="td-attachments">
+          <span class="text-xs font-semibold uppercase tracking-wide me-2" style="color: var(--text-faint);">
+            {{ t('ticket.attachments', lang=lang) }}:
+          </span>
+          {% for att in ticket.attachments %}
+          <a href="/api/tickets/{{ ticket.id }}/attachments/{{ att.id }}" target="_blank" class="td-attach-chip">
+            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+            </svg>
+            {{ att.file_name }}
+            <span style="color: var(--text-faint); font-size: 10px;">{{ (att.file_size / 1024)|round(1) }}KB</span>
+          </a>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- ── CONVERSATION DIVIDER ────────────────────────── -->
+      <div class="conv-divider">{{ t('timeline.title', lang=lang) if t('timeline.title', lang=lang) != 'timeline.title' else 'المحادثة' }}</div>
+
+      <!-- ── CONVERSATION FILTER PILLS ─────────────────── -->
+      <div style="display:flex;gap:6px;padding:6px 0 10px;flex-wrap:wrap;">
+        <button onclick="applyTlFilter('all')"      id="tlf-all"      class="tlf-pill tlf-active">{{ lang == 'ar' and 'الكل' or 'All' }}</button>
+        <button onclick="applyTlFilter('customer')" id="tlf-customer" class="tlf-pill">{{ lang == 'ar' and 'العميل' or 'Customer' }}</button>
+        <button onclick="applyTlFilter('support')"  id="tlf-support"  class="tlf-pill">{{ lang == 'ar' and 'الدعم الفني' or 'Support' }}</button>
+        <button onclick="applyTlFilter('internal')" id="tlf-internal" class="tlf-pill">{{ lang == 'ar' and 'داخلي' or 'Internal' }}</button>
+      </div>
+
+      <!-- ── CONVERSATION THREAD ────────────────────────── -->
+      <div class="td-conversation" id="conversation">
+        <!-- Populated by splitTimeline() JS -->
+      </div>
+
+      <!-- Hidden HTMX target (all timeline events) -->
+      <div id="timeline" class="hidden" aria-hidden="true">
+        {% include "tickets/_timeline_partial.html" %}
+      </div>
+
+      <!-- ── REPLY BOX ──────────────────────────────────── -->
+      {% if ticket.status not in ['closed','archived'] %}
+      <div class="td-reply-box tl-anim">
+        <!-- Tabs -->
+        <div class="td-reply-tabs">
+          <button @click="replyMode='external'"
+                  :class="replyMode==='external' ? 'rtab rtab-ext-active' : 'rtab'">
+            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/>
+            </svg>
+            {{ t('ticket.actions.reply', lang=lang) }}
+          </button>
+          <button @click="replyMode='internal'"
+                  :class="replyMode==='internal' ? 'rtab rtab-int-active' : 'rtab'">
+            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+            </svg>
+            {{ t('ticket.actions.internal_note', lang=lang) }}
+          </button>
+          <span x-show="showDraftBadge" x-transition class="td-draft-badge ms-2">
+            <svg class="h-2.5 w-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+            </svg>
+            {{ t('ticket_detail.auto_save', lang=lang) }}
+          </span>
+        </div>
+
+        <!-- Canned response -->
+        <div x-show="cannedOpen" @click.outside="cannedOpen=false"
+             x-transition:enter="transition ease-out duration-150"
+             x-transition:enter-start="opacity-0 translate-y-1"
+             x-transition:enter-end="opacity-100 translate-y-0"
+             class="canned-picker mx-14px mt-14px" style="margin: 14px 14px 0;">
+          <div style="padding:8px 12px;border-bottom:1px solid var(--border-color);">
+            <input type="text" x-model="cannedFilter"
+                   placeholder="{{ t('ticket_detail.canned_search', lang=lang) }}"
+                   class="form-input text-xs py-1 w-full"
+                   style="border:none;background:transparent;box-shadow:none;"
+                   @keydown.escape="cannedOpen=false">
+          </div>
+          <div class="max-h-40 overflow-y-auto">
+            <template x-for="c in filteredCanned" :key="c.id">
+              <button @click="insertCanned(c.content)" class="canned-item">
+                <span class="canned-kbd" x-text="'/'+c.shortcut"></span>
+                <span x-text="c.name" style="color: var(--text-ink);"></span>
+              </button>
+            </template>
+            <p x-show="filteredCanned.length===0" class="text-center text-xs py-4" style="color: var(--text-faint);">
+              {{ t('errors.not_found', lang=lang) }}
+            </p>
+          </div>
+        </div>
+
+        <!-- Form -->
+        <form class="td-reply-form"
+              hx-post="/api/tickets/{{ ticket.id }}/reply"
+              hx-target="#timeline"
+              hx-swap="innerHTML"
+              hx-encoding="multipart/form-data"
+              hx-indicator="#reply-spinner">
+          <input type="hidden" name="is_internal" :value="replyMode==='internal'?'1':'0'">
+          <input type="hidden" name="version" :value="ticketVersion">
+          <textarea name="content" rows="4" x-model="replyText"
+                    @keydown="if(event.key==='/'&&!replyText){event.preventDefault();cannedOpen=true;}"
+                    @input="if(replyText.startsWith('/')&&!cannedOpen)cannedOpen=true;"
+                    :placeholder="replyMode==='internal'
+                      ?'{{ t('ticket_detail.internal_placeholder', lang=lang) }}'
+                      :'{{ t('ticket.reply_placeholder', lang=lang) }}'"
+                    class="td-reply-textarea"
+                    :class="replyMode==='internal'?'internal-mode':''"
+                    required></textarea>
+          <div class="td-reply-actions">
+            <div class="flex items-center gap-10px" style="gap:10px">
+              <div x-data="{fileName:''}">
+                <label class="td-attach-btn">
+                  <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+                  </svg>
+                  {{ t('ticket.attach_file', lang=lang) }}
+                  <input type="file" name="attachment" class="hidden"
+                         accept=".jpg,.jpeg,.png,.gif,.pdf,.doc,.docx,.xls,.xlsx,.zip,.txt"
+                         @change="fileName=$event.target.files[0]?.name||''">
+                </label>
+                <span x-show="fileName" class="text-xs font-medium" style="color:#00AEEF;" x-text="fileName"></span>
+              </div>
+              <button type="button" x-show="replyText" x-transition
+                      @click="replyText='';showDraftBadge=false;localStorage.removeItem(draftKey)"
+                      class="td-attach-btn" style="color:var(--text-faint);">
+                <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+                {{ t('ticket_detail.draft_clear', lang=lang) }}
+              </button>
+              <span id="reply-spinner" class="htmx-indicator flex items-center gap-1.5 text-xs" style="color:var(--text-faint);">
+                <svg class="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
+                {{ t('app.loading', lang=lang) }}
+              </span>
+            </div>
+            <button type="submit"
+                    :disabled="!replyText.trim()"
+                    class="td-send-btn"
+                    :class="replyMode==='internal'?'internal-mode':''">
+              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+              </svg>
+              {{ t('ticket.reply_btn', lang=lang) }}
+            </button>
+          </div>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- ╔══ RIGHT SIDEBAR ══╗ -->
+    <aside class="td-sidebar" id="ticket-sidebar">
+
+      <!-- ─ PROPERTIES ─────────────────────────────── -->
+      <div class="td-section" x-data="{open:true}">
+        <div class="td-section-header" @click="open=!open">
+          <span class="td-section-title">
+            <svg class="h-3.5 w-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+            </svg>
+            {{ t('ticket_detail.properties', lang=lang) if t('ticket_detail.properties', lang=lang) != 'ticket_detail.properties' else 'خصائص التذكرة' }}
+          </span>
+          <svg class="h-4 w-4 transition-transform" :style="open?'':'transform:rotate(-90deg)'"
+               fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color: var(--text-faint);">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+          </svg>
+        </div>
+        <div x-show="open" class="td-section-body">
+          <div class="prop-item">
+            <span class="prop-k">{{ t('ticket.number', lang=lang) }}</span>
+            <span class="prop-v mono">{{ ticket.ticket_number }}</span>
+          </div>
+          <div class="prop-item">
+            <span class="prop-k">{{ t('ticket.status.label', lang=lang) }}</span>
+            <span class="badge-{{ ticket.status }}">{{ t('ticket.status.' ~ ticket.status, lang=lang) }}</span>
+          </div>
+          <div class="prop-item" x-data="{ editPrio: false }">
+            <span class="prop-k">{{ t('ticket.priority.label', lang=lang) }}</span>
+            <div class="flex items-center gap-4px" style="gap:4px;">
+              <span class="badge-{{ ticket.priority }}">{{ t('ticket.priority.' ~ ticket.priority, lang=lang) }}</span>
+              {% if request.state.user and request.state.user.get('role') in ('supervisor','manager','admin') %}
+              <button @click="editPrio = !editPrio"
+                      style="background:none;border:none;cursor:pointer;color:var(--text-faint);padding:2px;"
+                      title="{{ t('ticket.change_priority', lang=lang) if t('ticket.change_priority', lang=lang) != 'ticket.change_priority' else 'تغيير الأولوية' }}">
+                <svg style="width:12px;height:12px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z"/>
+                </svg>
+              </button>
+              {% endif %}
+            </div>
+            {% if request.state.user and request.state.user.get('role') in ('supervisor','manager','admin') %}
+            <div x-show="editPrio" x-transition style="position:absolute;inset-inline-end:0;top:100%;z-index:20;background:var(--bg-card);border:1px solid var(--border-color);border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:2px;min-width:140px;box-shadow:0 4px 12px rgba(0,0,0,0.15);">
+              {% for p in ['critical','high','medium','low'] %}
+              <form hx-patch="/api/tickets/{{ ticket.id }}/priority" hx-swap="none" style="margin:0;">
+                <input type="hidden" name="priority" value="{{ p }}">
+                <button type="submit" @click="editPrio = false"
+                        style="display:flex;align-items:center;gap:6px;width:100%;padding:6px 10px;border:none;background:{% if ticket.priority == p %}var(--bg-surface){% else %}transparent{% endif %};border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text-ink);text-align:start;"
+                        onmouseover="this.style.background='var(--bg-surface)'" onmouseout="this.style.background='{% if ticket.priority == p %}var(--bg-surface){% else %}transparent{% endif %}'">
+                  <span class="badge-{{ p }}" style="font-size:11px;">{{ t('ticket.priority.' ~ p, lang=lang) }}</span>
+                </button>
+              </form>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </div>
+          <div class="prop-item">
+            <span class="prop-k">{{ t('ticket.created_at', lang=lang) }}</span>
+            <span class="prop-v" style="font-size:12px;">{{ format_date(ticket.created_at, lang) }}</span>
+          </div>
+          <div class="prop-item">
+            <span class="prop-k">{{ t('ticket.assigned_to', lang=lang) }}</span>
+            {% if ticket.assignee %}
+            <div class="flex items-center gap-6px" style="gap:6px">
+              <div style="width:20px;height:20px;border-radius:50%;background:#00AEEF;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                {{ (ticket.assignee.full_name_ar or '?')[0] }}
+              </div>
+              <span class="prop-v" style="font-size:12px;">{{ ticket.assignee.full_name_ar if lang == 'ar' else (ticket.assignee.full_name_en or ticket.assignee.full_name_ar) }}</span>
+            </div>
+            {% else %}
+            <span class="prop-v" style="color: var(--text-faint); font-size:12px;">{{ t('ticket.unassigned', lang=lang) }}</span>
+            {% endif %}
+          </div>
+          {% if ticket.category %}
+          <div class="prop-item">
+            <span class="prop-k">{{ t('portal.category', lang=lang) }}</span>
+            <span class="prop-v" style="font-size:12px;">{{ bl(ticket.category, 'name', lang) }}</span>
+          </div>
+          {% endif %}
+          <div class="prop-item">
+            <span class="prop-k">{{ t('ticket.channel', lang=lang) }}</span>
+            <span class="prop-v capitalize" style="font-size:12px;">{{ ticket.channel }}</span>
+          </div>
+          {% if ticket.sla_deadline %}
+          <div class="prop-item">
+            <span class="prop-k">SLA</span>
+            <div>
+              <span class="text-xs font-semibold
+                {% if ticket.sla_breached %}text-red-600 dark:text-red-400
+                {% elif sla_ratio >= 0.75 %}text-amber-600 dark:text-amber-400
+                {% else %}text-emerald-600 dark:text-emerald-400{% endif %}">
+                {% if ticket.sla_breached %}⚠ {{ t('ticket.sla_breached', lang=lang) }}{% else %}{{ sla_remaining }}{% endif %}
+              </span>
+              {% if not ticket.sla_breached %}
+              <div class="sla-progress">
+                <div class="sla-track" style="width:120px;">
+                  {% set sp = [sla_ratio * 100, 100]|min|int %}
+                  <div class="sla-fill {% if sp>=100 %}bg-red-500{% elif sp>=75 %}bg-amber-500{% else %}bg-emerald-500{% endif %}"
+                       style="width:{{ sp }}%"></div>
+                </div>
+              </div>
+              {% endif %}
+            </div>
+          </div>
+          {% endif %}
+          {% set wts = ticket.work_time_seconds or 0 %}
+          {% if wts > 0 %}
+          <div class="prop-item">
+            <span class="prop-k">{{ t('ticket.work_time', lang=lang) if t('ticket.work_time', lang=lang) != 'ticket.work_time' else 'وقت العمل الفعلي' }}</span>
+            <span class="prop-v font-mono" style="font-size:12px;color:#00AEEF;font-weight:700;">
+              {{ '%02d'|format(wts // 3600) }}:{{ '%02d'|format((wts % 3600) // 60) }}:{{ '%02d'|format(wts % 60) }}
+            </span>
+          </div>
+          {% endif %}
+          {% if ticket.time_logged_seconds and ticket.time_logged_seconds > 0 %}
+          <div class="prop-item">
+            <span class="prop-k">{{ t('ticket.time_logged', lang=lang) }}</span>
+            <span class="prop-v font-mono" style="font-size:12px;">
+              {{ (ticket.time_logged_seconds // 3600) }}h {{ ((ticket.time_logged_seconds % 3600) // 60) }}m
+            </span>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- ─ SUBMITTER INFO ─────────────────────────── -->
+      <div class="td-section" x-data="{open:true}">
+        <div class="td-section-header" @click="open=!open">
+          <span class="td-section-title">
+            <svg class="h-3.5 w-3.5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0"/>
+            </svg>
+            {{ lang == 'ar' and 'مقدم الطلب' or 'Submitter' }}
+          </span>
+          <svg class="h-4 w-4 transition-transform" :style="open?'':'transform:rotate(-90deg)'"
+               fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color: var(--text-faint);">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+          </svg>
+        </div>
+        <div x-show="open" class="td-section-body">
+          <div class="prop-item">
+            <span class="prop-k">{{ lang == 'ar' and 'الاسم' or 'Name' }}</span>
+            <span class="prop-v" style="font-size:12px;font-weight:700;">{{ ticket.submitter_name or '—' }}</span>
+          </div>
+          <div class="prop-item">
+            <span class="prop-k">{{ lang == 'ar' and 'الجوال' or 'Phone' }}</span>
+            <span class="prop-v mono" style="font-size:12px;" dir="ltr">{{ ticket.submitter_phone or '—' }}</span>
+          </div>
+          {% if ticket.submitter_email %}
+          <div class="prop-item">
+            <span class="prop-k">{{ lang == 'ar' and 'البريد' or 'Email' }}</span>
+            <span class="prop-v" style="font-size:11px;">{{ ticket.submitter_email }}</span>
+          </div>
+          {% endif %}
+          {% if ticket.employee_id %}
+          <div class="prop-item">
+            <span class="prop-k">{{ lang == 'ar' and 'الرقم الوظيفي' or 'Employee ID' }}</span>
+            <span class="prop-v mono" style="font-size:12px;" dir="ltr">{{ ticket.employee_id }}</span>
+          </div>
+          {% endif %}
+          {% if ticket.branch %}
+          <div class="prop-item">
+            <span class="prop-k">{{ lang == 'ar' and 'الفرع' or 'Branch' }}</span>
+            <span class="prop-v" style="font-size:12px;">{{ ticket.branch.name_ar if lang == 'ar' else (ticket.branch.name_en or ticket.branch.name_ar) }}</span>
+          </div>
+          {% endif %}
+          {% if ticket.branch_employee and ticket.branch_employee.position_ar %}
+          <div class="prop-item">
+            <span class="prop-k">{{ lang == 'ar' and 'المنصب' or 'Position' }}</span>
+            <span class="prop-v" style="font-size:12px;">{{ ticket.branch_employee.position_ar if lang == 'ar' else (ticket.branch_employee.position_en or ticket.branch_employee.position_ar) }}</span>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if custom_fields_display %}
+      <!-- ─ REQUEST DETAILS ──────────────────────────── -->
+      <div class="td-section" x-data="{open:true}">
+        <div class="td-section-header" @click="open=!open">
+          <span class="td-section-title">
+            <svg class="h-3.5 w-3.5 text-cyan-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+            {{ lang == 'ar' and 'تفاصيل الطلب' or 'Request Details' }}
+          </span>
+          <svg class="h-4 w-4 transition-transform" :style="open?'':'transform:rotate(-90deg)'"
+               fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color: var(--text-faint);">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+          </svg>
+        </div>
+        <div x-show="open" class="td-section-body">
+          {% for cf in custom_fields_display %}
+          <div class="prop-item">
+            <span class="prop-k">{{ cf.label }}</span>
+            <span class="prop-v" style="font-size:12px;font-weight:600;">{{ cf.value }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- ─ ACTIVITY LOG ────────────────────────────── -->
+      <div class="td-section" x-data="{open:true}">
+        <div class="td-section-header" @click="open=!open">
+          <span class="td-section-title">
+            <svg class="h-3.5 w-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            سجل النشاط
+          </span>
+          <svg class="h-4 w-4 transition-transform" :style="open?'':'transform:rotate(-90deg)'"
+               fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color: var(--text-faint);">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+          </svg>
+        </div>
+        <div x-show="open">
+          <div id="activity-log" class="td-activity">
+            <!-- Populated by splitTimeline() -->
+          </div>
+        </div>
+      </div>
+
+      <!-- ─ KB QUICK ACCESS ─────────────────────────── -->
+      <div class="td-section flex-1" x-data="{open:true, kbQuery: document.getElementById('_kbInitQuery')?.dataset.v||'', articles: window._kbArticles||[]}">
+        <div class="td-section-header" @click="open=!open">
+          <span class="td-section-title">
+            <svg class="h-3.5 w-3.5 text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0118 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/>
+            </svg>
+            {{ t('kb.quick_access', lang=lang) }}
+          </span>
+          <svg class="h-4 w-4 transition-transform" :style="open?'':'transform:rotate(-90deg)'"
+               fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color: var(--text-faint);">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+          </svg>
+        </div>
+        <div x-show="open">
+          <div style="padding: 8px 12px; border-bottom: 1px solid var(--border-color);">
+            <div style="position:relative;">
+              <svg style="position:absolute;top:50%;transform:translateY(-50%);inset-inline-start:8px;height:14px;width:14px;pointer-events:none;color:var(--text-faint);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+              </svg>
+              <input type="search" x-model="kbQuery"
+                     @input.debounce.400ms="if(kbQuery.length>1) fetch('/api/kb/search?q='+encodeURIComponent(kbQuery)).then(r=>r.json()).then(d=>articles=d.results||[])"
+                     class="form-input text-xs w-full"
+                     style="padding-inline-start:28px;padding-top:6px;padding-bottom:6px;"
+                     placeholder="{{ t('kb.search_placeholder', lang=lang) }}">
+            </div>
+          </div>
+          <div class="td-kb-list">
+            <template x-for="a in articles" :key="a.id">
+              <a :href="'/kb/'+a.id" target="_blank" class="kb-article-card">
+                <p class="kb-article-title" x-text="a.title"></p>
+                <p class="kb-article-excerpt" x-text="a.excerpt"></p>
+              </a>
+            </template>
+            <div x-show="articles.length===0" class="text-center py-6" style="color: var(--text-faint); font-size:12px;">
+              {{ t('kb.search_placeholder', lang=lang) }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </aside>
+  </div>
+
+  <!-- ── SSE collision detection ──────────────────── -->
+  <div class="hidden" hx-ext="sse" sse-connect="/api/sse/ticket/{{ ticket.id }}"
+       sse-swap="viewers" hx-target="#collision-banner" hx-swap="innerHTML"
+       hx-on:sse-message="
+         try {
+           const d=JSON.parse(event.data);
+           const el=document.getElementById('collision-banner');
+           if(d.viewers&&d.viewers.length>0){
+             el.innerHTML='<span style=\'display:inline-flex;align-items:center;gap:4px;border-radius:99px;background:rgba(245,158,11,0.12);color:#D97706;padding:2px 8px;font-size:11px;font-weight:700;border:1px solid rgba(245,158,11,0.25);\'>⚠ '+d.viewers.map(v=>v.name).join(', ')+'</span>';
+           } else { el.innerHTML=''; }
+         } catch(e){}
+       "></div>
+
+  <!-- ── MODALS ────────────────────────────────────── -->
+  {% for modal_id, title_key, endpoint, reason_key in [
+    ('transfer','ticket.actions.transfer','/api/tickets/'~ticket.id~'/transfer','ticket_detail.transfer_to'),
+    ('escalate','ticket.actions.escalate','/api/tickets/'~ticket.id~'/escalate','ticket_detail.escalate_reason'),
+    ('resolve', 'ticket.actions.resolve', '/api/tickets/'~ticket.id~'/resolve', 'ticket_detail.resolve_note'),
+    ('close',   'ticket.actions.close',   '/api/tickets/'~ticket.id~'/close',   'ticket_detail.close_reason'),
+    ('pause_sla','ticket.actions.pause_sla','/api/tickets/'~ticket.id~'/pause-sla','ticket_detail.pause_reason')
+  ] %}
+  <div x-show="activeModal==='{{ modal_id }}'"
+       x-transition:enter="transition ease-out duration-200"
+       x-transition:enter-start="opacity-0"
+       x-transition:enter-end="opacity-100"
+       x-transition:leave="transition ease-in duration-150"
+       x-transition:leave-start="opacity-100"
+       x-transition:leave-end="opacity-0"
+       class="td-modal-overlay" style="display:none">
+    <div class="td-modal-box" @click.stop>
+      <div class="flex items-center justify-between mb-4">
+        <h3 style="font-size:16px;font-weight:700;color:var(--text-ink);">{{ t(title_key, lang=lang) }}</h3>
+        <button @click="activeModal=null" style="background:none;border:none;cursor:pointer;color:var(--text-faint);">
+          <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <form hx-post="{{ endpoint }}" hx-target="body" hx-swap="outerHTML">
+        <input type="hidden" name="version" :value="ticketVersion">
+        {% if modal_id == 'transfer' %}
+        <div class="mb-3">
+          <label class="form-label">{{ t('ticket_detail.transfer_agent', lang=lang) }}</label>
+          <select name="agent_id" class="form-input" required>
+            <option value="">— {{ t('app.select', lang=lang) }} —</option>
+            {% for agent in agents %}
+            <option value="{{ agent.id }}">{{ agent.full_name_ar if lang == 'ar' else (agent.full_name_en or agent.full_name_ar) }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% endif %}
+        <div class="mb-4">
+          <label class="form-label">{{ t(reason_key, lang=lang) }}</label>
+          <textarea name="reason" rows="3" class="form-input resize-none w-full"
+                    {% if modal_id in ['escalate','resolve'] %}required{% endif %}
+                    placeholder="..."></textarea>
+        </div>
+        <div class="flex gap-2">
+          <button type="submit" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border-radius:8px;font-size:14px;font-weight:700;color:#fff;border:none;cursor:pointer;background:{% if modal_id=='resolve' %}#10B981{% elif modal_id=='close' %}#EF4444{% else %}#00AEEF{% endif %};">
+            {{ t('app.confirm', lang=lang) }}
+          </button>
+          <button type="button" @click="activeModal=null" class="btn-secondary">
+            {{ t('app.cancel', lang=lang) }}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+
+  <!-- ── Split Ticket Modal ───────────────────────── -->
+  <div x-show="activeModal==='split'"
+       x-transition:enter="transition ease-out duration-200"
+       x-transition:enter-start="opacity-0"
+       x-transition:enter-end="opacity-100"
+       x-transition:leave="transition ease-in duration-150"
+       x-transition:leave-start="opacity-100"
+       x-transition:leave-end="opacity-0"
+       class="td-modal-overlay" style="display:none">
+    <div class="td-modal-box" @click.stop
+         x-data="{ splitSubject: '', splitReason: '', splitLoading: false, splitError: '' }">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <div style="width:36px;height:36px;border-radius:10px;background:rgba(0,174,239,0.12);display:flex;align-items:center;justify-content:center;">
+            <svg style="width:18px;height:18px;color:#00AEEF;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+            </svg>
+          </div>
+          <div>
+            <h3 style="font-size:15px;font-weight:700;color:var(--text-ink);">{{ t('ticket.actions.split', lang=lang) }}</h3>
+            <p style="font-size:11px;color:var(--text-faint);margin-top:2px;">{{ lang == 'ar' and 'إنشاء تذكرة فرعية مرتبطة بالتذكرة الحالية' or 'Create a linked child ticket from this ticket' }}</p>
+          </div>
+        </div>
+        <button @click="activeModal=null" style="background:none;border:none;cursor:pointer;color:var(--text-faint);">
+          <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <div style="padding:10px 14px;border-radius:8px;background:var(--bg-surface);border:1px solid var(--border-color);margin-bottom:14px;">
+        <p style="font-size:11px;color:var(--text-faint);margin-bottom:4px;">{{ lang == 'ar' and 'التذكرة الأصلية' or 'Parent Ticket' }}</p>
+        <p style="font-size:13px;font-weight:700;color:#00AEEF;">{{ ticket.ticket_number }}</p>
+        <p style="font-size:12px;color:var(--text-muted);margin-top:2px;">{{ ticket.subject }}</p>
+      </div>
+
+      <template x-if="splitError">
+        <div style="padding:8px 12px;border-radius:6px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);margin-bottom:12px;">
+          <p style="font-size:12px;color:#EF4444;" x-text="splitError"></p>
+        </div>
+      </template>
+
+      <div class="mb-3">
+        <label class="form-label">{{ t('ticket_detail.split_subject', lang=lang) }}</label>
+        <input type="text" x-model="splitSubject" class="form-input w-full"
+               placeholder="{{ t('ticket_detail.split_subject_placeholder', lang=lang) }}">
+      </div>
+      <div class="mb-4">
+        <label class="form-label">{{ t('ticket_detail.split_reason', lang=lang) }}</label>
+        <textarea x-model="splitReason" rows="3" class="form-input resize-none w-full"
+                  placeholder="{{ lang == 'ar' and 'وصف سبب التقسيم...' or 'Describe the reason for splitting...' }}"></textarea>
+      </div>
+
+      <p style="font-size:11px;color:var(--text-faint);margin-bottom:12px;">
+        {{ lang == 'ar' and 'سيتم نسخ الأولوية والقسم وبيانات العميل تلقائياً' or 'Priority, category, and customer info will be copied automatically' }}
+      </p>
+
+      <div class="flex gap-2">
+        <button @click="
+          if (!splitSubject.trim()) { splitError = '{{ lang == 'ar' and 'العنوان مطلوب' or 'Subject is required' }}'; return; }
+          splitLoading = true; splitError = '';
+          const fd = new FormData();
+          fd.append('subject', splitSubject);
+          fd.append('reason', splitReason);
+          fetch('/api/tickets/{{ ticket.id }}/split', { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(d => {
+              splitLoading = false;
+              if (d.ok) { window.location.href = '/tickets/' + d.child_id; }
+              else { splitError = d.detail || '{{ lang == 'ar' and 'حدث خطأ' or 'Error occurred' }}'; }
+            })
+            .catch(() => { splitLoading = false; splitError = '{{ lang == 'ar' and 'خطأ في الاتصال' or 'Connection error' }}'; });
+        " :disabled="splitLoading"
+           style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border-radius:8px;font-size:14px;font-weight:700;color:#fff;border:none;cursor:pointer;background:#00AEEF;">
+          <svg x-show="splitLoading" class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" class="opacity-25"></circle><path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" class="opacity-75"></path></svg>
+          <span x-text="splitLoading ? '' : '{{ t('app.confirm', lang=lang) }}'"></span>
+        </button>
+        <button type="button" @click="activeModal=null" class="btn-secondary">
+          {{ t('app.cancel', lang=lang) }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Merge Tickets Modal ───────────────────────── -->
+  {% if request.state.user and request.state.user.get('role') in ('supervisor','manager','admin') %}
+  <div x-show="activeModal==='merge'"
+       x-transition:enter="transition ease-out duration-200"
+       x-transition:enter-start="opacity-0"
+       x-transition:enter-end="opacity-100"
+       x-transition:leave="transition ease-in duration-150"
+       x-transition:leave-start="opacity-100"
+       x-transition:leave-end="opacity-0"
+       class="td-modal-overlay" style="display:none">
+    <div class="td-modal-box" @click.stop style="max-width:520px;"
+         x-data="{
+           mergeSearch: '', mergeResults: [], mergeSelected: [],
+           mergeLoading: false, mergeError: '', searching: false, mergeReason: '',
+           async searchTickets() {
+             if (this.mergeSearch.length < 2) { this.mergeResults = []; return; }
+             this.searching = true;
+             try {
+               const r = await fetch('/api/tickets/search?q=' + encodeURIComponent(this.mergeSearch));
+               const d = await r.json();
+               this.mergeResults = (d.tickets || []).filter(t => t.id !== '{{ ticket.id }}');
+             } catch(e) { this.mergeResults = []; }
+             this.searching = false;
+           },
+           addToMerge(t) {
+             if (!this.mergeSelected.find(s => s.id === t.id)) {
+               this.mergeSelected.push(t);
+             }
+             this.mergeSearch = ''; this.mergeResults = [];
+           },
+           removeFromMerge(id) { this.mergeSelected = this.mergeSelected.filter(s => s.id !== id); },
+           async doMerge() {
+             if (!this.mergeSelected.length) { this.mergeError = '{{ lang == 'ar' and 'اختر تذكرة واحدة على الأقل' or 'Select at least one ticket' }}'; return; }
+             this.mergeLoading = true; this.mergeError = '';
+             const fd = new FormData();
+             fd.append('primary_id', '{{ ticket.id }}');
+             fd.append('secondary_ids', this.mergeSelected.map(s => s.id).join(','));
+             fd.append('reason', this.mergeReason);
+             try {
+               const r = await fetch('/api/tickets/merge', { method: 'POST', body: fd });
+               const d = await r.json();
+               if (d.ok) { window.location.reload(); }
+               else { this.mergeError = d.detail || '{{ lang == 'ar' and 'حدث خطأ' or 'Error' }}'; }
+             } catch(e) { this.mergeError = '{{ lang == 'ar' and 'خطأ في الاتصال' or 'Connection error' }}'; }
+             this.mergeLoading = false;
+           }
+         }">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <div style="width:36px;height:36px;border-radius:10px;background:rgba(139,92,246,0.12);display:flex;align-items:center;justify-content:center;">
+            <svg style="width:18px;height:18px;color:#8B5CF6;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/>
+            </svg>
+          </div>
+          <div>
+            <h3 style="font-size:15px;font-weight:700;color:var(--text-ink);">{{ lang == 'ar' and 'دمج التذاكر' or 'Merge Tickets' }}</h3>
+            <p style="font-size:11px;color:var(--text-faint);margin-top:2px;">{{ lang == 'ar' and 'دمج تذاكر أخرى في هذه التذكرة (لا يمكن التراجع)' or 'Merge other tickets into this one (permanent)' }}</p>
+          </div>
+        </div>
+        <button @click="activeModal=null" style="background:none;border:none;cursor:pointer;color:var(--text-faint);">
+          <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Primary ticket (this one) -->
+      <div style="padding:10px 14px;border-radius:8px;background:rgba(0,174,239,0.06);border:1px solid rgba(0,174,239,0.2);margin-bottom:14px;">
+        <div class="flex items-center gap-2">
+          <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:99px;background:rgba(0,174,239,0.15);color:#00AEEF;">{{ lang == 'ar' and 'الأساسية' or 'PRIMARY' }}</span>
+          <span style="font-size:13px;font-weight:700;color:#00AEEF;">{{ ticket.ticket_number }}</span>
+        </div>
+        <p style="font-size:12px;color:var(--text-muted);margin-top:4px;">{{ ticket.subject }}</p>
+      </div>
+
+      <!-- Search for tickets to merge -->
+      <div class="mb-3">
+        <label class="form-label">{{ lang == 'ar' and 'ابحث عن تذاكر للدمج' or 'Search tickets to merge' }}</label>
+        <div style="position:relative;">
+          <input type="text" x-model="mergeSearch" @input.debounce.400ms="searchTickets()" class="form-input w-full"
+                 placeholder="{{ lang == 'ar' and 'رقم التذكرة أو العنوان...' or 'Ticket number or subject...' }}"
+                 style="padding-inline-start:36px;">
+          <svg style="position:absolute;top:50%;transform:translateY(-50%);inset-inline-start:10px;width:16px;height:16px;color:var(--text-faint);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+          </svg>
+        </div>
+        <!-- Search results dropdown -->
+        <div x-show="mergeResults.length > 0" style="margin-top:4px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-card);max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.15);">
+          <template x-for="r in mergeResults" :key="r.id">
+            <button @click="addToMerge(r)" style="display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;border:none;background:none;cursor:pointer;text-align:start;transition:background 0.1s;" onmouseover="this.style.background='var(--bg-surface)'" onmouseout="this.style.background='none'">
+              <span style="font-size:12px;font-weight:700;color:#00AEEF;" x-text="r.ticket_number"></span>
+              <span style="font-size:11px;color:var(--text-muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" x-text="r.subject || '—'"></span>
+              <span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:99px;background:var(--bg-surface);color:var(--text-faint);" x-text="r.status"></span>
+            </button>
+          </template>
+        </div>
+      </div>
+
+      <!-- Selected tickets to merge -->
+      <template x-if="mergeSelected.length > 0">
+        <div class="mb-3">
+          <label class="form-label" style="margin-bottom:6px;">{{ lang == 'ar' and 'سيتم دمجها وإغلاقها' or 'Will be merged & closed' }} (<span x-text="mergeSelected.length"></span>)</label>
+          <div style="display:flex;flex-direction:column;gap:4px;">
+            <template x-for="s in mergeSelected" :key="s.id">
+              <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;background:var(--bg-surface);border:1px solid var(--border-color);">
+                <span style="font-size:12px;font-weight:700;color:#00AEEF;" x-text="s.ticket_number"></span>
+                <span style="font-size:11px;color:var(--text-muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" x-text="s.subject || '—'"></span>
+                <button @click="removeFromMerge(s.id)" style="background:none;border:none;cursor:pointer;color:var(--text-faint);flex-shrink:0;">
+                  <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+
+      <div class="mb-4">
+        <label class="form-label">{{ lang == 'ar' and 'سبب الدمج (اختياري)' or 'Merge reason (optional)' }}</label>
+        <textarea x-model="mergeReason" rows="2" class="form-input resize-none w-full"
+                  placeholder="{{ lang == 'ar' and 'سبب الدمج...' or 'Reason for merging...' }}"></textarea>
+      </div>
+
+      <template x-if="mergeError">
+        <div style="padding:8px 12px;border-radius:6px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);margin-bottom:12px;">
+          <p style="font-size:12px;color:#EF4444;" x-text="mergeError"></p>
+        </div>
+      </template>
+
+      <p style="font-size:11px;color:var(--text-faint);margin-bottom:12px;">
+        <svg class="h-3 w-3 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+        {{ lang == 'ar' and 'التذاكر المدمجة ستُغلق نهائياً وتُنقل ردودها العامة لهذه التذكرة. لا يمكن التراجع.' or 'Merged tickets will be permanently closed and their public replies moved here. This cannot be undone.' }}
+      </p>
+
+      <div class="flex gap-2">
+        <button @click="doMerge()" :disabled="mergeLoading || !mergeSelected.length"
+                style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border-radius:8px;font-size:14px;font-weight:700;color:#fff;border:none;cursor:pointer;background:#8B5CF6;"
+                :style="!mergeSelected.length ? 'opacity:0.5;cursor:not-allowed;' : ''">
+          <svg x-show="mergeLoading" class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" class="opacity-25"></circle><path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" class="opacity-75"></path></svg>
+          <span x-text="mergeLoading ? '' : '{{ lang == 'ar' and 'تأكيد الدمج' or 'Confirm Merge' }}'"></span>
+        </button>
+        <button type="button" @click="activeModal=null" class="btn-secondary">
+          {{ t('app.cancel', lang=lang) }}
+        </button>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ── Return Ticket Modal (supervisor/manager only) ──── -->
+  {% if request.state.user and request.state.user.get('role') in ('supervisor','manager','admin') %}
+  <div x-show="activeModal==='return_ticket'"
+       x-transition:enter="transition ease-out duration-200"
+       x-transition:enter-start="opacity-0"
+       x-transition:enter-end="opacity-100"
+       x-transition:leave="transition ease-in duration-150"
+       x-transition:leave-start="opacity-100"
+       x-transition:leave-end="opacity-0"
+       class="td-modal-overlay" style="display:none">
+    <div class="td-modal-box" @click.stop x-data="{ returnTarget: '{% if last_escalator %}escalator{% else %}queue_main{% endif %}' }" style="max-width:480px;">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <div style="width:36px;height:36px;border-radius:10px;background:rgba(245,158,11,0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+            <svg style="width:18px;height:18px;color:#F59E0B;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3"/>
+            </svg>
+          </div>
+          <h3 style="font-size:16px;font-weight:700;color:var(--text-ink);">{{ t('ticket.actions.return_ticket', lang=lang) }}</h3>
+        </div>
+        <button @click="activeModal=null" style="background:none;border:none;cursor:pointer;color:var(--text-faint);">
+          <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <form hx-post="/api/tickets/{{ ticket.id }}/return-ticket" hx-target="body" hx-swap="outerHTML">
+        <input type="hidden" name="version" :value="ticketVersion">
+        <div class="mb-3">
+          <label class="form-label" style="margin-bottom:8px;">{{ t('ticket.return_target', lang=lang) }}</label>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+
+            {# ── Option: Return to escalator ── #}
+            {% if last_escalator %}
+            <label style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:8px;border:1.5px solid var(--border-color);transition:all 0.15s;"
+                   :style="returnTarget==='escalator' ? 'border-color:#00AEEF;background:rgba(0,174,239,0.06);' : ''">
+              <input type="radio" name="target" value="escalator" x-model="returnTarget" class="sr-only">
+              <span style="width:28px;height:28px;border-radius:50%;background:rgba(139,92,246,0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                <svg style="width:14px;height:14px;color:#8B5CF6;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0"/>
+                </svg>
+              </span>
+              <div style="flex:1;">
+                <span style="font-size:13px;font-weight:700;color:var(--text-ink);display:block;">{{ t('ticket.return_to_escalator', lang=lang) }}</span>
+                <span style="font-size:11px;color:#8B5CF6;font-weight:600;">{{ last_escalator.full_name_ar if lang == 'ar' else (last_escalator.full_name_en or last_escalator.full_name_ar) }}</span>
+              </div>
+            </label>
+            {% endif %}
+
+            {# ── Option: Main Queue ── #}
+            <label style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:8px;border:1.5px solid var(--border-color);transition:all 0.15s;"
+                   :style="returnTarget==='queue_main' ? 'border-color:#00AEEF;background:rgba(0,174,239,0.06);' : ''">
+              <input type="radio" name="target" value="queue_main" x-model="returnTarget" class="sr-only">
+              <span style="width:28px;height:28px;border-radius:50%;background:rgba(16,185,129,0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                <svg style="width:14px;height:14px;color:#10B981;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859"/>
+                </svg>
+              </span>
+              <span style="font-size:13px;font-weight:600;color:var(--text-ink);">{{ t('ticket.return_to_main_queue', lang=lang) }}</span>
+            </label>
+
+            {# ── Option: Specialized Queue (with department dropdown) ── #}
+            <label style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:8px;border:1.5px solid var(--border-color);transition:all 0.15s;"
+                   :style="returnTarget==='queue_specialized' ? 'border-color:#00AEEF;background:rgba(0,174,239,0.06);' : ''">
+              <input type="radio" name="target" value="queue_specialized" x-model="returnTarget" class="sr-only">
+              <span style="width:28px;height:28px;border-radius:50%;background:rgba(245,158,11,0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                <svg style="width:14px;height:14px;color:#F59E0B;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15"/>
+                </svg>
+              </span>
+              <span style="font-size:13px;font-weight:600;color:var(--text-ink);">{{ t('ticket.return_to_specialized', lang=lang) }}</span>
+            </label>
+
+            {# ── Option: Specific Agent ── #}
+            <label style="cursor:pointer;display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:8px;border:1.5px solid var(--border-color);transition:all 0.15s;"
+                   :style="returnTarget==='agent' ? 'border-color:#00AEEF;background:rgba(0,174,239,0.06);' : ''">
+              <input type="radio" name="target" value="agent" x-model="returnTarget" class="sr-only">
+              <span style="width:28px;height:28px;border-radius:50%;background:rgba(59,130,246,0.12);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                <svg style="width:14px;height:14px;color:#3B82F6;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197"/>
+                </svg>
+              </span>
+              <span style="font-size:13px;font-weight:600;color:var(--text-ink);">{{ t('ticket.return_to_agent', lang=lang) }}</span>
+            </label>
+
+          </div>
+        </div>
+
+        {# ── Department dropdown (visible when specialized is selected) ── #}
+        <div x-show="returnTarget==='queue_specialized'" x-transition class="mb-3">
+          <label class="form-label">{{ t('ticket.select_department', lang=lang) }}</label>
+          <select name="department_id" class="form-input" :required="returnTarget==='queue_specialized'">
+            <option value="">— {{ t('app.select', lang=lang) }} —</option>
+            {% for dept in departments %}
+            <option value="{{ dept.id }}">{{ dept.name_ar if lang == 'ar' else dept.name_en }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        {# ── Agent dropdown (visible when specific agent is selected) ── #}
+        <div x-show="returnTarget==='agent'" x-transition class="mb-3">
+          <label class="form-label">{{ t('ticket_detail.transfer_agent', lang=lang) }}</label>
+          <select name="agent_id" class="form-input" :required="returnTarget==='agent'">
+            <option value="">— {{ t('app.select', lang=lang) }} —</option>
+            {% for agent in agents %}
+            <option value="{{ agent.id }}">{{ agent.full_name_ar if lang == 'ar' else (agent.full_name_en or agent.full_name_ar) }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="mb-4">
+          <label class="form-label">{{ t('ticket.return_reason', lang=lang) }}</label>
+          <textarea name="reason" rows="3" class="form-input resize-none w-full"
+                    placeholder="..."></textarea>
+        </div>
+        <div class="flex gap-2">
+          <button type="submit" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border-radius:8px;font-size:14px;font-weight:700;color:#fff;border:none;cursor:pointer;background:#F59E0B;">
+            <svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3"/>
+            </svg>
+            {{ t('app.confirm', lang=lang) }}
+          </button>
+          <button type="button" @click="activeModal=null" class="btn-secondary">
+            {{ t('app.cancel', lang=lang) }}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+
+<!-- ── JavaScript: Split timeline into conversation + activity ── -->
+<script>
+const REPLY_TYPES = ['reply_external', 'reply_internal', 'reply_customer'];
+
+/* Filter → allowed reply_types mapping */
+const TLF_MAP = {
+  all:      ['reply_external', 'reply_internal', 'reply_customer'],
+  customer: ['reply_customer'],
+  support:  ['reply_external'],
+  internal: ['reply_internal'],
+};
+
+window.tlFilter = 'all';
+
+function applyTlFilter(f) {
+  window.tlFilter = f;
+  /* Update active pill */
+  document.querySelectorAll('.tlf-pill').forEach(function(btn) {
+    btn.classList.toggle('tlf-active', btn.id === 'tlf-' + f);
+  });
+  splitTimeline();
+}
+
+function splitTimeline() {
+  const tl = document.getElementById('timeline');
+  const conv = document.getElementById('conversation');
+  const actLog = document.getElementById('activity-log');
+  if (!tl || !conv || !actLog) return;
+
+  conv.innerHTML = '';
+  actLog.innerHTML = '';
+
+  const allowed = TLF_MAP[window.tlFilter] || TLF_MAP.all;
+  const items = tl.querySelectorAll('[data-event-type]');
+  let hasConv = false, hasActivity = false;
+
+  items.forEach(function(el) {
+    const type = el.getAttribute('data-event-type');
+    const clone = el.cloneNode(true);
+    clone.classList.add('tl-anim');
+
+    if (REPLY_TYPES.includes(type)) {
+      if (!allowed.includes(type)) return; /* filtered out */
+      const msgEl = clone.querySelector('.msg-bubble');
+      if (msgEl) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'tl-anim';
+        wrapper.appendChild(msgEl);
+        conv.appendChild(wrapper);
+        hasConv = true;
+      }
+    } else {
+      /* Activity log is always visible regardless of filter */
+      const actEl = clone.querySelector('.activity-item');
+      if (actEl) {
+        actLog.appendChild(actEl);
+        hasActivity = true;
+      }
+    }
+  });
+
+  const emptyLabel = '{{ lang == "ar" and "لا توجد ردود في هذه الفئة" or "No messages in this category" }}';
+  if (!hasConv) {
+    conv.innerHTML = '<div class="empty-conversation"><svg class="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg><p>' + emptyLabel + '</p></div>';
+  }
+  if (!hasActivity) {
+    actLog.innerHTML = '<div class="py-4 text-center text-xs" style="color:var(--text-faint);">لا يوجد نشاط</div>';
+  }
+}
+
+document.addEventListener('DOMContentLoaded', splitTimeline);
+
+document.addEventListener('htmx:afterSwap', function(e) {
+  if (e.detail.target && e.detail.target.id === 'timeline') {
+    splitTimeline();
+  }
+});
+</script>
+
+{% endblock %}

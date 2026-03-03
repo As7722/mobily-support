@@ -1,0 +1,294 @@
+{% extends "base_app.html" %}
+{% block title %}{{ lang == 'ar' and 'إدارة المستخدمين والصلاحيات' or 'Users & Permissions' }} — موبايلي{% endblock %}
+{% block page_title %}{{ lang == 'ar' and 'إدارة المستخدمين والصلاحيات' or 'Users & Permissions' }}{% endblock %}
+
+{% set _r = {
+  'employee':   {'ar': 'موظف',    'en': 'Employee',   'cls': 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'},
+  'supervisor': {'ar': 'مشرف',    'en': 'Supervisor',  'cls': 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'},
+  'manager':    {'ar': 'مدير',    'en': 'Manager',     'cls': 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'},
+  'admin':      {'ar': 'أدمن',    'en': 'Admin',       'cls': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'},
+} %}
+
+{% block content %}
+<div class="p-6 space-y-5 fade-in" x-data="userMgr()">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between">
+    <div>
+      <h2 class="text-lg font-bold" style="color:var(--text-ink);">{{ lang == 'ar' and 'إدارة المستخدمين والصلاحيات' or 'Users & Permissions' }}</h2>
+      <p class="text-xs" style="color:var(--text-faint);">{{ lang == 'ar' and 'إنشاء وتعديل الموظفين وتغيير أدوارهم وأقسامهم' or 'Create, edit users, change roles and departments' }}</p>
+    </div>
+    <button @click="openCreate()" class="btn-primary btn-sm" style="display:inline-flex;align-items:center;gap:5px;">
+      <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+      {{ lang == 'ar' and 'إنشاء مستخدم' or 'Create User' }}
+    </button>
+  </div>
+
+  <!-- Search + Filter -->
+  <div class="card p-4">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <div class="relative flex-1" style="min-width:200px;">
+        <svg class="absolute start-3 top-1/2 -translate-y-1/2 h-4 w-4 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color:var(--text-faint);"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803a7.5 7.5 0 0010.607 0z"/></svg>
+        <input type="text" x-model="search" placeholder="{{ lang == 'ar' and 'بحث بالاسم أو اليوزر...' or 'Search by name or username...' }}" class="form-input ps-9 w-full">
+      </div>
+      <select x-model="roleFilter" class="form-input" style="width:auto;">
+        <option value="all">{{ lang == 'ar' and 'كل الأدوار' or 'All Roles' }}</option>
+        <option value="employee">{{ lang == 'ar' and 'موظف' or 'Employee' }}</option>
+        <option value="supervisor">{{ lang == 'ar' and 'مشرف' or 'Supervisor' }}</option>
+        <option value="manager">{{ lang == 'ar' and 'مدير' or 'Manager' }}</option>
+        <option value="admin">{{ lang == 'ar' and 'أدمن' or 'Admin' }}</option>
+      </select>
+      <select x-model="statusFilter" class="form-input" style="width:auto;">
+        <option value="all">{{ lang == 'ar' and 'الكل' or 'All' }}</option>
+        <option value="active">{{ lang == 'ar' and 'نشط' or 'Active' }}</option>
+        <option value="inactive">{{ lang == 'ar' and 'موقوف' or 'Inactive' }}</option>
+      </select>
+    </div>
+    <p class="mt-2 text-xs" style="color:var(--text-faint);" x-text="filteredUsers.length + ' / {{ users|length }}'"></p>
+  </div>
+
+  <!-- Users Table -->
+  <div class="card overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>{{ lang == 'ar' and 'المستخدم' or 'User' }}</th>
+            <th>{{ lang == 'ar' and 'الدور' or 'Role' }}</th>
+            <th>{{ lang == 'ar' and 'الأقسام' or 'Departments' }}</th>
+            <th>{{ lang == 'ar' and 'الحالة' or 'Status' }}</th>
+            <th>{{ lang == 'ar' and 'إجراءات' or 'Actions' }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="u in filteredUsers" :key="u.id">
+            <tr>
+              <td>
+                <div>
+                  <p class="text-sm font-bold" style="color:var(--text-ink);" x-text="u.name"></p>
+                  <p class="text-[10px] font-mono" style="color:var(--text-faint);" x-text="u.username"></p>
+                  <p x-show="u.email" class="text-[10px]" style="color:var(--text-faint);" x-text="u.email"></p>
+                </div>
+              </td>
+              <td>
+                <template x-if="u.role === 'admin' && currentRole !== 'admin'">
+                  <span class="text-xs px-2 py-0.5 rounded-full font-semibold bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">Admin</span>
+                </template>
+                <template x-if="!(u.role === 'admin' && currentRole !== 'admin')">
+                  <select @change="changeRole(u.id, $event.target.value)"
+                          class="form-input text-xs py-1" style="min-width:110px;"
+                          :value="u.role">
+                    <option value="employee">{{ lang == 'ar' and 'موظف' or 'Employee' }}</option>
+                    <option value="supervisor">{{ lang == 'ar' and 'مشرف' or 'Supervisor' }}</option>
+                    <option value="manager">{{ lang == 'ar' and 'مدير' or 'Manager' }}</option>
+                    <template x-if="currentRole === 'admin'">
+                      <option value="admin">{{ lang == 'ar' and 'أدمن' or 'Admin' }}</option>
+                    </template>
+                  </select>
+                </template>
+              </td>
+              <td>
+                <div class="flex flex-wrap gap-1">
+                  <template x-for="d in allDepts" :key="d.id">
+                    <label class="inline-flex items-center gap-1 cursor-pointer rounded border px-1.5 py-0.5 text-[9px] font-semibold transition-all"
+                           :style="u.dept_ids.includes(d.id) ? 'border-color:#00AEEF;background:rgba(0,174,239,0.08);color:#00AEEF;' : 'border-color:var(--border-color);color:var(--text-faint);'">
+                      <input type="checkbox" :checked="u.dept_ids.includes(d.id)"
+                             @change="toggleUserDept(u, d.id, $event.target.checked)"
+                             style="accent-color:#00AEEF;width:10px;height:10px;">
+                      <span x-text="d.name"></span>
+                    </label>
+                  </template>
+                </div>
+              </td>
+              <td>
+                <button @click="toggleActive(u)"
+                        :disabled="u.role === 'admin' && currentRole !== 'admin'"
+                        class="text-xs px-2 py-0.5 rounded-full font-semibold transition-all"
+                        :class="u.role === 'admin' && currentRole !== 'admin' ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'"
+                        :style="u.is_active ? 'background:rgba(16,185,129,0.1);color:#10B981;' : 'background:rgba(239,68,68,0.1);color:#EF4444;'"
+                        x-text="u.is_active ? '{{ lang == 'ar' and 'نشط' or 'Active' }}' : '{{ lang == 'ar' and 'موقوف' or 'Inactive' }}'">
+                </button>
+              </td>
+              <td>
+                <div style="display:flex;gap:3px;" x-show="!(u.role === 'admin' && currentRole !== 'admin')">
+                  <button @click="openEdit(u)" class="btn-ghost btn-sm" style="padding:4px;" title="{{ lang == 'ar' and 'تعديل' or 'Edit' }}">
+                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z"/></svg>
+                  </button>
+                  <button @click="resetPassword(u.id)" class="btn-ghost btn-sm" style="padding:4px;" title="{{ lang == 'ar' and 'إعادة تعيين كلمة المرور' or 'Reset Password' }}">
+                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z"/></svg>
+                  </button>
+                  <button @click="forceLogout(u.id)"
+                          class="btn-ghost btn-sm" style="padding:4px;color:#EF4444;" title="{{ lang == 'ar' and 'إنهاء الجلسة' or 'Force Logout' }}">
+                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg>
+                  </button>
+                </div>
+                <span x-show="u.role === 'admin' && currentRole !== 'admin'" class="text-[10px]" style="color:var(--text-faint);">
+                  {{ lang == 'ar' and 'محمي' or 'Protected' }}
+                </span>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Create/Edit Modal -->
+  <div x-show="showModal" x-transition class="modal-overlay" style="z-index:200;">
+    <div class="modal-box" style="max-width:560px;" @click.outside="showModal=false">
+      <div style="padding:20px 24px;border-bottom:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between;">
+        <h2 class="text-base font-bold" style="color:var(--text-ink);" x-text="editing ? '{{ lang == 'ar' and 'تعديل مستخدم' or 'Edit User' }}' : '{{ lang == 'ar' and 'إنشاء مستخدم جديد' or 'Create New User' }}'"></h2>
+        <button @click="showModal=false" class="btn-ghost btn-sm" style="padding:6px;"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+      </div>
+      <div style="padding:20px 24px;" class="space-y-3">
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="form-label">{{ lang == 'ar' and 'اسم المستخدم' or 'Username' }} *</label><input type="text" x-model="form.username" class="form-input" dir="ltr" :disabled="!!editing"></div>
+          <div><label class="form-label">{{ lang == 'ar' and 'الدور' or 'Role' }}</label>
+            <select x-model="form.role" class="form-input">
+              <option value="employee">{{ lang == 'ar' and 'موظف' or 'Employee' }}</option>
+              <option value="supervisor">{{ lang == 'ar' and 'مشرف' or 'Supervisor' }}</option>
+              <option value="manager">{{ lang == 'ar' and 'مدير' or 'Manager' }}</option>
+              {% if request.state.user and request.state.user.get('role') == 'admin' %}
+              <option value="admin">{{ lang == 'ar' and 'أدمن' or 'Admin' }}</option>
+              {% endif %}
+            </select>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="form-label">{{ lang == 'ar' and 'الاسم (عربي)' or 'Name (AR)' }} *</label><input type="text" x-model="form.full_name_ar" class="form-input"></div>
+          <div><label class="form-label">{{ lang == 'ar' and 'الاسم (إنجليزي)' or 'Name (EN)' }}</label><input type="text" x-model="form.full_name_en" class="form-input"></div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="form-label">{{ lang == 'ar' and 'البريد' or 'Email' }}</label><input type="email" x-model="form.email" class="form-input" dir="ltr"></div>
+          <div><label class="form-label">{{ lang == 'ar' and 'الجوال' or 'Phone' }}</label><input type="tel" x-model="form.phone" class="form-input" dir="ltr"></div>
+        </div>
+        <div x-show="!editing">
+          <label class="form-label">{{ lang == 'ar' and 'كلمة المرور' or 'Password' }}</label>
+          <input type="text" x-model="form.password" class="form-input" dir="ltr" placeholder="{{ lang == 'ar' and 'كلمة مرور مؤقتة' or 'Temporary password' }}">
+        </div>
+        <div x-show="formError" class="text-xs text-red-600" x-text="formError"></div>
+      </div>
+      <div style="padding:16px 24px;border-top:1px solid var(--border-color);display:flex;gap:8px;justify-content:flex-end;">
+        <button @click="showModal=false" class="btn-secondary btn-sm">{{ lang == 'ar' and 'إلغاء' or 'Cancel' }}</button>
+        <button @click="saveUser()" :disabled="saving" class="btn-primary btn-sm">
+          <span x-text="editing ? '{{ lang == 'ar' and 'حفظ' or 'Save' }}' : '{{ lang == 'ar' and 'إنشاء' or 'Create' }}'"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+window._currentRole = '{{ current_role }}';
+window._usersData = [
+  {% for user in users %}
+  {% set user_depts = user_dept_map.get(user.id|string, []) %}
+  {
+    id: '{{ user.id }}',
+    username: '{{ user.username }}',
+    name: '{{ user.full_name_ar if lang == "ar" else (user.full_name_en or user.full_name_ar) }}',
+    full_name_ar: '{{ user.full_name_ar }}',
+    full_name_en: '{{ user.full_name_en or "" }}',
+    email: '{{ user.email or "" }}',
+    phone: '{{ user.phone or "" }}',
+    role: '{{ user.role }}',
+    is_active: {{ 'true' if user.is_active else 'false' }},
+    dept_ids: [{% for d in user_depts %}'{{ d }}'{% if not loop.last %},{% endif %}{% endfor %}],
+  },
+  {% endfor %}
+];
+window._deptsData = [
+  {% for dept in departments %}
+  { id: '{{ dept.id }}', name: '{{ dept.name_ar if lang == "ar" else (dept.name_en or dept.name_ar) }}' },
+  {% endfor %}
+];
+
+function userMgr() {
+  return {
+    users: window._usersData || [],
+    allDepts: window._deptsData || [],
+    currentRole: window._currentRole || '',
+    search: '',
+    roleFilter: 'all',
+    statusFilter: 'all',
+    showModal: false,
+    editing: null,
+    form: { username:'', full_name_ar:'', full_name_en:'', email:'', phone:'', role:'employee', password:'' },
+    formError: '',
+    saving: false,
+
+    get filteredUsers() {
+      var self = this, s = self.search.toLowerCase();
+      return self.users.filter(function(u) {
+        var ms = !s || u.name.toLowerCase().indexOf(s)>=0 || u.username.toLowerCase().indexOf(s)>=0 || (u.email||'').toLowerCase().indexOf(s)>=0;
+        var mr = self.roleFilter === 'all' || u.role === self.roleFilter;
+        var mst = self.statusFilter === 'all' || (self.statusFilter === 'active' && u.is_active) || (self.statusFilter === 'inactive' && !u.is_active);
+        return ms && mr && mst;
+      });
+    },
+
+    openCreate() {
+      this.editing = null;
+      this.form = { username:'', full_name_ar:'', full_name_en:'', email:'', phone:'', role:'employee', password:'' };
+      this.formError = '';
+      this.showModal = true;
+    },
+
+    openEdit(u) {
+      this.editing = u;
+      this.form = { username: u.username, full_name_ar: u.full_name_ar, full_name_en: u.full_name_en, email: u.email, phone: u.phone, role: u.role, password:'' };
+      this.formError = '';
+      this.showModal = true;
+    },
+
+    saveUser() {
+      var self = this;
+      if (!self.form.username || !self.form.full_name_ar) { self.formError = '{{ lang == "ar" and "اسم المستخدم والاسم مطلوبين" or "Username and name required" }}'; return; }
+      if (!self.editing && (!self.form.password || self.form.password.length < 8)) { self.formError = '{{ lang == "ar" and "كلمة المرور مطلوبة (8 أحرف على الأقل)" or "Password required (min 8 characters)" }}'; return; }
+      self.saving = true; self.formError = '';
+      var url = self.editing ? '/api/manager/users/' + self.editing.id : '/api/manager/users';
+      fetch(url, { method: self.editing ? 'PUT' : 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(self.form) })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (d.ok) { self.showModal = false; location.reload(); }
+          else { self.formError = d.detail || 'Error'; }
+          self.saving = false;
+        }).catch(function() { self.saving = false; self.formError = 'Error'; });
+    },
+
+    changeRole(uid, newRole) {
+      if (!confirm('{{ lang == "ar" and "هل تريد تغيير دور هذا المستخدم؟" or "Change this user role?" }}')) { location.reload(); return; }
+      fetch('/api/manager/users/' + uid + '/change-role', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({role: newRole}) })
+        .then(function(r) { return r.json(); })
+        .then(function(d) { if (d.ok) { var u = window._usersData.find(function(x){return x.id===uid;}); if(u) u.role=newRole; } });
+    },
+
+    toggleActive(u) {
+      fetch('/api/manager/users/' + u.id + '/toggle-active', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(d) { if (d.ok) u.is_active = d.is_active; });
+    },
+
+    toggleUserDept(u, deptId, checked) {
+      if (checked && !u.dept_ids.includes(deptId)) u.dept_ids.push(deptId);
+      if (!checked) u.dept_ids = u.dept_ids.filter(function(d){return d!==deptId;});
+      fetch('/api/manager/users/' + u.id + '/departments', { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({department_ids: u.dept_ids}) });
+    },
+
+    resetPassword(uid) {
+      var p = prompt('{{ lang == "ar" and "أدخل كلمة المرور الجديدة (8 أحرف على الأقل):" or "Enter new password (min 8 characters):" }}', '');
+      if (!p || p.length < 8) return;
+      fetch('/api/manager/users/' + uid + '/reset-password', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({password: p}) })
+        .then(function(r) { return r.json(); })
+        .then(function(d) { if (d.ok) alert('{{ lang == "ar" and "تم تغيير كلمة المرور" or "Password changed" }}'); else if (d.detail) alert(d.detail); });
+    },
+
+    forceLogout(uid) {
+      if (!confirm('{{ lang == "ar" and "إنهاء جميع جلسات هذا المستخدم؟" or "Terminate all sessions?" }}')) return;
+      fetch('/api/manager/users/' + uid + '/force-logout', { method: 'POST' });
+    },
+  };
+}
+</script>
+{% endblock %}

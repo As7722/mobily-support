@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ article.title_ar if lang == "ar" else (article.title_en or article.title_ar) }} — موبايلي{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto p-6 space-y-5">
+  <a href="/portal/kb" class="btn-secondary">{{ t('kb.back_to_portal', lang=lang) }}</a>
+
+  <article class="card p-8">
+    <h1 class="text-2xl font-bold mb-4" style="color: var(--text-ink);">
+      {{ article.title_ar if lang == "ar" else (article.title_en or article.title_ar) }}
+    </h1>
+    <div class="prose prose-gray dark:prose-invert max-w-none whitespace-pre-wrap" style="color: var(--text-ink);">
+      {{ article.content_ar if lang == "ar" else (article.content_en or article.content_ar) }}
+    </div>
+    {% if article.attachment_storage_key %}
+    <div class="mt-6">
+      <a href="/portal/kb/articles/{{ article.id }}/attachment" class="inline-flex items-center gap-2 text-primary hover:underline">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13"/>
+        </svg>
+        {{ t('kb.attachment_download', lang=lang) }}: {{ article.attachment_file_name }}
+      </a>
+    </div>
+    {% endif %}
+  </article>
+
+  {% if related %}
+  <div class="card p-5">
+    <h3 class="font-semibold mb-3" style="color: var(--text-ink);">{{ t('kb.related', lang=lang) }}</h3>
+    <div class="space-y-2">
+      {% for rel in related %}
+      <a href="/portal/kb/{{ rel.id }}" class="block text-sm hover:underline text-primary">
+        {{ rel.title_ar if lang == "ar" else (rel.title_en or rel.title_ar) }}
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

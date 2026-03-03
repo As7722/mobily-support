@@ -1,0 +1,324 @@
+{% extends "base_app.html" %}
+{% block title %}{{ t('manager.analytics', lang=lang) }} — موبايلي{% endblock %}
+{% block page_title %}{{ t('manager.analytics', lang=lang) }}{% endblock %}
+
+{% block extra_head %}
+{{ super() }}
+<script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.2/dist/apexcharts.min.js" defer></script>
+{% endblock %}
+
+{% block content %}
+<div class="p-6 space-y-6 fade-in">
+
+  <!-- ── Header / Period Selector ───────────────────────────────────────── -->
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div>
+      <h2 class="text-lg font-bold text-slate-900 dark:text-white">{{ t('manager.analytics', lang=lang) }}</h2>
+      <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">نظرة شاملة على أداء النظام والفريق</p>
+    </div>
+
+    <!-- Segmented Period Control -->
+    <div class="seg-control">
+      {% for p, label in [
+        ('today',   t('period.today',   lang=lang)),
+        ('week',    t('period.week',    lang=lang)),
+        ('month',   t('period.month',   lang=lang)),
+        ('quarter', t('period.quarter', lang=lang)),
+        ('year',    t('period.year',    lang=lang)),
+      ] %}
+      <a href="/manager/analytics?period={{ p }}"
+         class="seg-btn {% if period == p %}active{% endif %}">
+        {{ label }}
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- ── KPI Grid ────────────────────────────────────────────────────────── -->
+  {% set csat_display = ('%.1f'|format(kpis.csat) ~ ' / 5') if kpis.csat else '—' %}
+  {% set avg_hrs = ((kpis.avg_resolution_mins // 60)|string ~ 'h ' ~ (kpis.avg_resolution_mins % 60)|string ~ 'm') if kpis.avg_resolution_mins else '—' %}
+
+  <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+
+    {% set kpi_items = [
+      ('kpi-card-blue',   'kpi-icon-blue',   kpis.total_tickets,    t('stats.total_tickets', lang=lang),    none,   'inbox'),
+      ('kpi-card-green',  'kpi-icon-green',  kpis.resolved_tickets, t('stats.resolved',      lang=lang),    kpis.resolved_change|default(none, true), 'check'),
+      ('kpi-card-amber',  'kpi-icon-amber',  avg_hrs,               t('stats.avg_resolution_time', lang=lang), kpis.resolution_change|default(none, true), 'clock'),
+      ('kpi-card-violet', 'kpi-icon-violet', (kpis.sla_compliance_pct|string ~ '%') if kpis.sla_compliance_pct else '—', t('stats.sla_compliance', lang=lang), kpis.sla_change|default(none, true), 'shield'),
+      ('kpi-card-amber',  'kpi-icon-amber',  csat_display,          t('stats.csat',          lang=lang),    kpis.csat_change|default(none, true), 'star'),
+    ] %}
+
+    {% for card_cls, icon_cls, value, label, change, icon_type in kpi_items %}
+    <div class="kpi-card {{ card_cls }}">
+      <div class="flex items-start justify-between">
+        <div class="kpi-icon {{ icon_cls }}">
+          {% if icon_type == 'inbox' %}
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859m-19.5.338V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H6.911a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661z"/>
+          </svg>
+          {% elif icon_type == 'check' %}
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          {% elif icon_type == 'clock' %}
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          {% elif icon_type == 'shield' %}
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/>
+          </svg>
+          {% elif icon_type == 'star' %}
+          <svg fill="currentColor" viewBox="0 0 24 24">
+            <path d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z"/>
+          </svg>
+          {% endif %}
+        </div>
+
+        {# Change indicator #}
+        {% if change is not none and change is number and change != 0 %}
+        <span class="inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[11px] font-bold
+          {% if change > 0 %}bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400
+          {% else %}bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400{% endif %}">
+          {% if change > 0 %}
+          <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4.5 10.5L12 3m0 0l7.5 7.5M12 3v18"/>
+          </svg>
+          {% else %}
+          <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19.5 13.5L12 21m0 0l-7.5-7.5M12 21V3"/>
+          </svg>
+          {% endif %}
+          {{ change|abs }}%
+        </span>
+        {% endif %}
+      </div>
+
+      <div class="mt-4">
+        <p class="text-2xl font-bold text-slate-900 dark:text-white">{{ value }}</p>
+        <p class="mt-0.5 text-xs font-medium text-slate-500 dark:text-slate-400">{{ label }}</p>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- ── Charts Section ────────────────────────────────────────────────── -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+    <!-- Ticket Trend -->
+    <div class="card p-5">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-2">
+          <div class="flex h-7 w-7 items-center justify-center rounded-lg" style="background: var(--bg-muted);">
+            <svg class="h-4 w-4" style="color: var(--text-muted);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941"/>
+            </svg>
+          </div>
+          <h3 class="text-sm font-semibold text-slate-900 dark:text-white">{{ t('mgr.trend_chart', lang=lang) }}</h3>
+        </div>
+        <span class="badge-resolved">{{ period }}</span>
+      </div>
+      <div id="trend-chart"></div>
+    </div>
+
+    <!-- Channel Breakdown Donut -->
+    <div class="card p-5">
+      <div class="flex items-center gap-2 mb-4">
+        <div class="flex h-7 w-7 items-center justify-center rounded-lg" style="background: var(--bg-muted);">
+          <svg class="h-4 w-4" style="color: var(--text-muted);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.5 6a7.5 7.5 0 107.5 7.5h-7.5V6z M13.5 10.5H21A7.5 7.5 0 0013.5 3v7.5z"/>
+          </svg>
+        </div>
+        <h3 class="text-sm font-semibold text-slate-900 dark:text-white">{{ t('mgr.channel_breakdown', lang=lang) }}</h3>
+      </div>
+      <div id="channel-donut"></div>
+    </div>
+  </div>
+
+  <!-- ── Peak Hours Heatmap ─────────────────────────────────────────────── -->
+  <div class="card p-5">
+    <div class="flex items-center gap-2 mb-4">
+      <div class="flex h-7 w-7 items-center justify-center rounded-lg" style="background: var(--bg-muted);">
+        <svg class="h-4 w-4" style="color: var(--text-muted);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+      </div>
+      <h3 class="text-sm font-semibold text-slate-900 dark:text-white">{{ t('mgr.peak_hours', lang=lang) }}</h3>
+    </div>
+    <div id="peak-hours-heatmap"></div>
+  </div>
+
+  <!-- ── Top Agents ──────────────────────────────────────────────────────── -->
+  {% if top_agents %}
+  <div class="card overflow-hidden">
+    <div class="flex items-center gap-2 px-5 py-4 border-b" style="border-color: var(--border-color);">
+      <div class="flex h-7 w-7 items-center justify-center rounded-lg dark:bg-amber-950" style="background: #FEF3C7;">
+        <svg class="h-4 w-4 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M16.5 18.75h-9m9 0a3 3 0 013 3h-15a3 3 0 013-3m9 0v-3.375c0-.621-.503-1.125-1.125-1.125h-.871M7.5 18.75v-3.375c0-.621.504-1.125 1.125-1.125h.872m5.007 0H9.497m5.007 0a7.454 7.454 0 01-.982-3.172M9.497 14.25a7.454 7.454 0 00.981-3.172M5.25 4.236c-.982.143-1.954.317-2.916.52A6.003 6.003 0 007.73 9.728M5.25 4.236V4.5c0 2.108.966 3.99 2.48 5.228M5.25 4.236V2.721C7.456 2.41 9.71 2.25 12 2.25c2.291 0 4.545.16 6.75.47v1.516M7.73 9.728a6.726 6.726 0 002.748 1.35m8.272-6.842V4.5c0 2.108-.966 3.99-2.48 5.228m2.48-5.492a46.32 46.32 0 012.916.52 6.003 6.003 0 01-5.395 4.972m0 0a6.726 6.726 0 01-2.749 1.35m0 0a6.772 6.772 0 01-3.044 0"/>
+        </svg>
+      </div>
+      <h3 class="text-sm font-semibold text-slate-900 dark:text-white">{{ t('mgr.top_agents', lang=lang) }}</h3>
+    </div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>{{ t('auth.username', lang=lang) }}</th>
+          <th>{{ t('stats.resolved', lang=lang) }}</th>
+          <th>{{ t('stats.avg_resolution_time', lang=lang) }}</th>
+          <th>{{ t('stats.csat', lang=lang) }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for agent in top_agents %}
+        <tr>
+          <td>
+            <span class="flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold
+              {% if loop.index == 1 %}bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400
+              {% elif loop.index == 2 %}bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300
+              {% elif loop.index == 3 %}bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400
+              {% else %}bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400{% endif %}">
+              {{ loop.index }}
+            </span>
+          </td>
+          <td>
+            <div class="flex items-center gap-2">
+              <div class="flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">
+                {{ (agent.full_name_ar or '?')[0] }}
+              </div>
+              <span class="text-[13px] font-medium text-slate-900 dark:text-white">
+                {{ agent.full_name_ar if lang == 'ar' else (agent.full_name_en or agent.full_name_ar) }}
+              </span>
+            </div>
+          </td>
+          <td>
+            <span class="text-[13px] font-bold text-emerald-600 dark:text-emerald-400">{{ agent.resolved }}</span>
+          </td>
+          <td>
+            <span class="text-[13px] text-slate-600 dark:text-slate-400">
+              {% if agent.avg_mins %}{{ (agent.avg_mins / 60)|int }}h {{ agent.avg_mins % 60 }}m{% else %}—{% endif %}
+            </span>
+          </td>
+          <td>
+            {% if agent.csat_avg %}
+            <div class="flex items-center gap-1">
+              <svg class="h-3.5 w-3.5 text-amber-500" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z"/>
+              </svg>
+              <span class="text-[13px] font-semibold text-slate-700 dark:text-slate-300">{{ '%.1f'|format(agent.csat_avg) }}</span>
+            </div>
+            {% else %}<span class="text-slate-400">—</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- ── KB Gaps Report ───────────────────────────────────────────── -->
+  {% if kb_gaps %}
+  <div class="card-panel p-5 mt-6">
+    <div class="flex items-center gap-2 mb-4">
+      <svg class="h-5 w-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+      </svg>
+      <h3 class="text-sm font-bold" style="color:var(--text-ink);">{{ t('mgr.kb_gaps_title', lang=lang) }}</h3>
+    </div>
+    <p class="text-xs mb-3" style="color:var(--text-faint);">{{ t('mgr.kb_gaps_desc', lang=lang) }}</p>
+    <div class="space-y-2">
+      {% for gap in kb_gaps %}
+      <div class="flex items-center justify-between px-3 py-2 rounded-lg" style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);">
+        <span class="text-xs font-semibold" style="color:var(--text-ink);">
+          {{ gap.topic if lang == 'ar' else (gap.topic_en or gap.topic) }}
+        </span>
+        <span class="text-xs font-bold px-2 py-0.5 rounded-full" style="background:rgba(239,68,68,0.12);color:#EF4444;">
+          {{ gap.count }} {{ 'تذكرة' if lang == 'ar' else 'tickets' }}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{% block extra_scripts %}
+<script>
+(function () {
+  const isDark   = document.documentElement.classList.contains('dark');
+  const textClr  = isDark ? '#94a3b8' : '#64748b';
+  const gridClr  = isDark ? '#1e293b' : '#f1f5f9';
+  const trendData = {{ trend | tojson }};
+  const peakData  = {{ peak_hours | tojson }};
+  const channelData = {{ kpis.channel_breakdown | tojson }};
+
+  /* ── Trend Chart ──────────────────────────────────────────────── */
+  if (document.getElementById('trend-chart') && trendData.length) {
+    new ApexCharts(document.getElementById('trend-chart'), {
+      chart: { type: 'area', height: 240, background: 'transparent', toolbar: { show: false }, fontFamily: 'inherit' },
+      theme: { mode: isDark ? 'dark' : 'light' },
+      series: [
+        { name: '{{ t("kpi.resolved", lang=lang) }}',      data: trendData.map(d => d.resolved) },
+        { name: '{{ t("kpi.total_tickets", lang=lang) }}', data: trendData.map(d => d.created)  },
+      ],
+      xaxis: { categories: trendData.map(d => d.date.slice(5)), labels: { style: { colors: textClr, fontSize: '11px' } } },
+      yaxis: { labels: { style: { colors: textClr, fontSize: '11px' } } },
+      colors: ['#059669', '#005EB8'],
+      fill: { type: 'gradient', gradient: { opacityFrom: 0.35, opacityTo: 0.05 } },
+      stroke: { width: 2.5, curve: 'smooth' },
+      dataLabels: { enabled: false },
+      legend: { position: 'top', fontSize: '12px', labels: { colors: textClr } },
+      grid: { borderColor: gridClr, strokeDashArray: 4 },
+      tooltip: { theme: isDark ? 'dark' : 'light' },
+    }).render();
+  }
+
+  /* ── Channel Donut ────────────────────────────────────────────── */
+  const channelEl = document.getElementById('channel-donut');
+  if (channelEl && Object.keys(channelData).length) {
+    new ApexCharts(channelEl, {
+      chart: { type: 'donut', height: 240, background: 'transparent', fontFamily: 'inherit' },
+      theme: { mode: isDark ? 'dark' : 'light' },
+      labels: Object.keys(channelData),
+      series: Object.values(channelData),
+      colors: ['#005EB8', '#059669', '#D97706', '#7C3AED', '#DC2626'],
+      legend: { position: 'bottom', fontSize: '12px', labels: { colors: textClr } },
+      dataLabels: { style: { fontSize: '11px', fontFamily: 'inherit' } },
+      plotOptions: { pie: { donut: { size: '65%', labels: { show: true, total: { show: true, color: textClr } } } } },
+      stroke: { show: false },
+    }).render();
+  }
+
+  /* ── Peak Hours Heatmap ────────────────────────────────────────── */
+  const days = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+  const heatSeries = days.map((dayName, dow) => ({
+    name: dayName,
+    data: Array.from({ length: 24 }, (_, hr) => {
+      const found = peakData.find(d => d.dow == dow && d.hr == hr);
+      return { x: hr + ':00', y: found ? found.cnt : 0 };
+    }),
+  }));
+  const peakEl = document.getElementById('peak-hours-heatmap');
+  if (peakEl) {
+    new ApexCharts(peakEl, {
+      chart: { type: 'heatmap', height: 220, background: 'transparent', toolbar: { show: false }, fontFamily: 'inherit' },
+      theme: { mode: isDark ? 'dark' : 'light' },
+      series: heatSeries,
+      dataLabels: { enabled: false },
+      colors: ['#005EB8'],
+      xaxis: { labels: { style: { colors: textClr, fontSize: '10px' } } },
+      yaxis: { labels: { style: { colors: textClr, fontSize: '11px' } } },
+      tooltip: { theme: isDark ? 'dark' : 'light' },
+      legend: { show: false },
+    }).render();
+  }
+})();
+</script>
+{% endblock %}
+{% endblock %}

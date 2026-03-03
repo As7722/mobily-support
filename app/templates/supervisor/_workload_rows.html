@@ -1,0 +1,84 @@
+{% for agent in workload %}
+<tr>
+  <td>
+    <div class="flex items-center gap-2.5">
+      <div class="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 to-primary/30 text-primary text-xs font-bold shrink-0">
+        {{ ((agent.full_name if lang == 'ar' else agent.full_name_en) or '?')[0] }}
+      </div>
+      <p class="text-[13px] font-semibold" style="color: var(--text-ink);">
+        {{ agent.full_name if lang == 'ar' else agent.full_name_en }}
+      </p>
+    </div>
+  </td>
+  <td>
+    {% if agent.is_online %}
+    <span class="flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+      <span class="relative flex h-2 w-2">
+        <span class="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping"></span>
+        <span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+      </span>
+      {{ t('dash.online', lang=lang) }}
+    </span>
+    {% else %}
+    <span class="flex items-center gap-1.5 text-xs font-medium" style="color: var(--text-faint);">
+      <span class="h-2 w-2 rounded-full" style="background: var(--border-color);"></span>
+      {{ t('dash.offline', lang=lang) }}
+    </span>
+    {% endif %}
+  </td>
+  <td>
+    <span class="text-[13px] font-bold" style="color: var(--text-ink);">{{ agent.active_tickets }}</span>
+  </td>
+  <td>
+    <span class="text-[13px]" style="color: var(--text-ink);">{{ agent.resolved_today }}</span>
+  </td>
+  <td>
+    {% if agent.sla_breaches > 0 %}
+    <span class="badge-critical">
+      <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m9.303 3.376c.866 1.5-.217 3.374-1.948 3.374H4.645c-1.73 0-2.813-1.874-1.948-3.374L10.05 3.378c.866-1.5 3.032-1.5 3.898 0L21.303 16.126zM12 15.75h.007v.008H12v-.008z"/>
+      </svg>
+      {{ agent.sla_breaches }}
+    </span>
+    {% else %}
+    <span class="badge-resolved">
+      <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.5 12.75l6 6 9-13.5"/>
+      </svg>
+      0
+    </span>
+    {% endif %}
+  </td>
+  <td>
+    <div class="flex items-center gap-2.5 min-w-[120px]">
+      <div class="flex-1 h-1.5 rounded-full overflow-hidden" style="background: var(--border-color);">
+        <div class="h-full rounded-full transition-all duration-500
+          {% if agent.workload_score >= 80 %}bg-red-500
+          {% elif agent.workload_score >= 60 %}bg-amber-500
+          {% else %}bg-emerald-500{% endif %}"
+             style="width: {{ agent.workload_score }}%"></div>
+      </div>
+      <span class="text-xs font-semibold w-8 text-end
+        {% if agent.workload_score >= 80 %}text-red-600 dark:text-red-400
+        {% elif agent.workload_score >= 60 %}text-amber-600 dark:text-amber-400
+        {% else %}text-emerald-600 dark:text-emerald-400{% endif %}">
+        {{ agent.workload_score }}%
+      </span>
+    </div>
+  </td>
+</tr>
+{% else %}
+<tr>
+  <td colspan="6" class="text-center py-10">
+    <div class="flex flex-col items-center gap-2">
+      <div class="flex h-10 w-10 items-center justify-center rounded-xl" style="background: var(--bg-surface);">
+        <svg class="h-5 w-5" style="color: var(--text-faint);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"/>
+        </svg>
+      </div>
+      <p class="text-sm" style="color: var(--text-faint);">{{ t('dash.empty_queue', lang=lang) }}</p>
+    </div>
+  </td>
+</tr>
+{% endfor %}

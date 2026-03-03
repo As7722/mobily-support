@@ -1,0 +1,124 @@
+{# HTMX partial — rendered by queue endpoints #}
+{% set is_sup = request.state.user and request.state.user.get('role') in ('supervisor','manager','admin') %}
+{% if queue.tickets %}
+  {% for ticket in queue.tickets %}
+  {% set score = queue.scores.get(ticket.id|string, 0) %}
+  <tr class="tkt-row {% if ticket.sla_breached %}bg-red-50/50 dark:bg-red-950/20{% endif %}" data-ticket-id="{{ ticket.id }}">
+    {% if is_sup %}
+    <td style="width:32px;padding:4px 8px;vertical-align:middle;">
+      <label style="display:flex;align-items:center;justify-content:center;cursor:pointer;">
+        <input type="checkbox" class="tkt-checkbox" value="{{ ticket.id }}"
+               style="width:15px;height:15px;accent-color:#00AEEF;cursor:pointer;">
+      </label>
+    </td>
+    {% endif %}
+    <td style="width:4px;padding:0;">
+      <div style="width:3px;height:36px;border-radius:3px;background:{% if ticket.priority == 'urgent' %}#EF4444{% elif ticket.priority == 'high' %}#F59E0B{% elif ticket.priority == 'medium' %}#3B82F6{% else %}#6B7280{% endif %};"></div>
+    </td>
+    <td>
+      <a href="/tickets/{{ ticket.id }}" class="group flex flex-col gap-0.5">
+        <span class="font-mono text-xs font-bold group-hover:underline" style="color: #00AEEF;">{{ ticket.ticket_number }}</span>
+        {% if ticket.subject %}
+        <span class="text-[11px] truncate max-w-[220px]" style="color: var(--text-faint);">{{ ticket.subject }}</span>
+        {% endif %}
+      </a>
+    </td>
+    <td>
+      <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:700;
+        {% if ticket.status == 'open' %}background:rgba(59,130,246,0.12);color:#3B82F6;
+        {% elif ticket.status == 'pending_customer' %}background:rgba(245,158,11,0.12);color:#F59E0B;
+        {% elif ticket.status == 'pending_3rd' %}background:rgba(139,92,246,0.12);color:#8B5CF6;
+        {% elif ticket.status == 'resolved' %}background:rgba(16,185,129,0.12);color:#10B981;
+        {% elif ticket.status == 'closed' %}background:rgba(107,114,128,0.12);color:#6B7280;
+        {% else %}background:rgba(107,114,128,0.12);color:#6B7280;{% endif %}">
+        {{ t('ticket.status.' ~ ticket.status, lang=lang) }}
+      </span>
+    </td>
+    <td>
+      <span class="badge-{{ ticket.priority }}">
+        <span class="dot-{{ ticket.priority }}"></span>
+        {{ t('ticket.priority.' ~ ticket.priority, lang=lang) }}
+      </span>
+    </td>
+    <td>
+      <div class="flex items-center gap-2">
+        <div class="h-1.5 w-14 rounded-full overflow-hidden" style="background: var(--border-color);">
+          <div class="h-full rounded-full transition-all duration-300
+            {% if score >= 70 %}bg-red-500{% elif score >= 40 %}bg-amber-500{% else %}bg-emerald-500{% endif %}"
+               style="width: {{ [score, 100]|min }}%"></div>
+        </div>
+        <span class="text-xs font-semibold {% if score >= 70 %}text-red-600 dark:text-red-400{% elif score >= 40 %}text-amber-600 dark:text-amber-400{% else %}text-[var(--text-muted)]{% endif %}">
+          {{ score }}
+        </span>
+      </div>
+    </td>
+    <td>
+      {% if ticket.sla_deadline %}
+      <div class="flex items-center gap-1.5">
+        {% if ticket.sla_breached %}
+        <svg class="h-3.5 w-3.5 text-red-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+        </svg>
+        <span class="text-xs font-semibold text-red-600 dark:text-red-400">{{ t('ticket.sla_breached', lang=lang) }}</span>
+        {% else %}
+        <svg class="h-3.5 w-3.5 shrink-0" style="color: var(--text-faint);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <span class="text-xs" style="color: var(--text-muted);">{{ format_date(ticket.sla_deadline, lang) }}</span>
+        {% endif %}
+      </div>
+      {% else %}
+      <span style="color: var(--text-faint);">—</span>
+      {% endif %}
+    </td>
+    <td>
+      {% if ticket.assignee %}
+      <div class="flex items-center gap-2">
+        <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold" style="background: var(--border-color); color: var(--text-muted);">
+          {{ (ticket.assignee.full_name_ar or '?')[0] }}
+        </div>
+        <span class="text-[12px] truncate max-w-[100px]" style="color: var(--text-ink);">
+          {{ ticket.assignee.full_name_ar if lang == 'ar' else (ticket.assignee.full_name_en or ticket.assignee.full_name_ar) }}
+        </span>
+      </div>
+      {% else %}
+      <span class="text-[11px] italic" style="color: var(--text-faint);">{{ t('dash.unassigned', lang=lang) }}</span>
+      {% endif %}
+    </td>
+    <td>
+      <div class="flex items-center gap-1.5">
+        {% if not ticket.assigned_to %}
+        <button hx-post="/api/dashboard/claim/{{ ticket.id }}"
+                hx-target="closest tr"
+                hx-swap="outerHTML"
+                class="btn-primary btn-sm">
+          {{ t('dash.claim', lang=lang) }}
+        </button>
+        {% endif %}
+        <a href="/tickets/{{ ticket.id }}"
+           class="flex h-7 w-7 items-center justify-center rounded-lg border hover:text-primary transition"
+           style="border-color: var(--border-color); color: var(--text-muted);">
+          <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="{% if dir == 'rtl' %}M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18{% else %}M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3{% endif %}"/>
+          </svg>
+        </a>
+      </div>
+    </td>
+  </tr>
+  {% endfor %}
+{% else %}
+  <tr>
+    <td colspan="10" class="text-center py-12">
+      <div class="flex flex-col items-center gap-3">
+        <div class="flex h-12 w-12 items-center justify-center rounded-2xl" style="background: var(--bg-surface);">
+          <svg class="h-6 w-6" style="color: var(--text-faint);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                  d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+        <p class="text-sm" style="color: var(--text-faint);">{{ t('dash.empty_queue', lang=lang) }}</p>
+      </div>
+    </td>
+  </tr>
+{% endif %}

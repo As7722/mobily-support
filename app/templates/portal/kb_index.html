@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}{{ t('kb.portal_title', lang=lang) }} — موبايلي{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto p-6 space-y-6">
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-bold" style="color: var(--text-ink);">{{ t('kb.portal_title', lang=lang) }}</h1>
+      <p class="text-sm mt-1" style="color: var(--text-muted);">{{ total_articles }} {{ t('kb.published_articles', lang=lang) }}</p>
+    </div>
+    <a href="/portal" class="btn-secondary">{{ t('app.back', lang=lang) }}</a>
+  </div>
+
+  <div class="relative" x-data="{ focused: false }">
+    <input id="portal-kb-search"
+           name="q"
+           value="{{ search_query }}"
+           placeholder="{{ t('kb.search_placeholder', lang=lang) }}"
+           class="form-input"
+           hx-get="/api/portal/kb/search-html"
+           hx-trigger="keyup changed delay:300ms"
+           hx-target="#portal-kb-search-results"
+           hx-include="[id='portal-kb-search']"
+           @focus="focused = true"
+           @blur="setTimeout(() => focused = false, 200)">
+    <div id="portal-kb-search-results"
+         class="absolute z-20 w-full mt-1 rounded-xl shadow-lg"
+         style="background: var(--bg-card); border: 1px solid var(--border-color);"
+         x-show="focused && document.getElementById('portal-kb-search').value.length > 1"
+         x-cloak></div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+    <aside class="lg:col-span-1">
+      <div class="card p-4">
+        <h2 class="text-sm font-semibold mb-3" style="color: var(--text-muted);">{{ t('kb.categories', lang=lang) }}</h2>
+        <nav class="space-y-1">
+          <a href="/portal/kb"
+             class="block px-3 py-2 rounded-lg text-sm {% if not selected_category %}bg-primary/10 text-primary{% else %}hover:bg-gray-50 dark:hover:bg-gray-800{% endif %}">
+            {{ t('app.all', lang=lang) }}
+          </a>
+          {% for cat in categories %}
+          <a href="/portal/kb?category_id={{ cat.id }}"
+             class="block px-3 py-2 rounded-lg text-sm {% if selected_category == cat.id|string %}bg-primary/10 text-primary{% else %}hover:bg-gray-50 dark:hover:bg-gray-800{% endif %}">
+            {{ cat.name_ar if lang == "ar" else (cat.name_en or cat.name_ar) }}
+          </a>
+          {% endfor %}
+        </nav>
+      </div>
+    </aside>
+
+    <main class="lg:col-span-3">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {% for article in articles %}
+        <a href="/portal/kb/{{ article.id }}" class="card p-5 block hover:shadow-md transition">
+          <h3 class="font-semibold mb-2" style="color: var(--text-ink);">
+            {{ article.title_ar if lang == "ar" else (article.title_en or article.title_ar) }}
+          </h3>
+          <p class="text-sm line-clamp-3" style="color: var(--text-muted);">
+            {{ (article.content_ar if lang == "ar" else (article.content_en or article.content_ar))[:170] }}...
+          </p>
+        </a>
+        {% endfor %}
+      </div>
+      {% if not articles %}
+      <div class="card p-8 text-center text-sm" style="color: var(--text-muted);">
+        {{ t('kb.no_results', lang=lang) }}
+      </div>
+      {% endif %}
+    </main>
+  </div>
+</div>
+{% endblock %}

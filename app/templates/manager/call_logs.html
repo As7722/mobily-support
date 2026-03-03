@@ -1,0 +1,152 @@
+{% extends "base_app.html" %}
+{% block title %}{{ lang == 'ar' and 'سجلات المكالمات' or 'Call Logs' }} — موبايلي{% endblock %}
+{% block page_title %}{{ lang == 'ar' and 'سجلات المكالمات' or 'Call Logs' }}{% endblock %}
+
+{% block content %}
+<div class="p-6 space-y-5">
+
+  <!-- Header -->
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+    <div>
+      <h2 style="font-size:18px;font-weight:800;color:var(--text-ink);">
+        {{ lang == 'ar' and 'سجلات المكالمات' or 'Call Logs' }}
+      </h2>
+      <p style="font-size:12px;color:var(--text-faint);margin-top:2px;">
+        {{ lang == 'ar' and 'إجمالي' or 'Total' }}: <strong style="color:var(--text-ink);">{{ total }}</strong>
+        {{ lang == 'ar' and 'مكالمة مسجلة' or 'logged calls' }}
+      </p>
+    </div>
+    <a href="/api/call-logs/export"
+       style="display:inline-flex;align-items:center;gap:8px;padding:9px 18px;border-radius:9px;
+              background:#10B981;color:white;font-weight:700;font-size:13px;text-decoration:none;transition:opacity 0.15s;"
+       onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/>
+      </svg>
+      {{ lang == 'ar' and 'تصدير Excel' or 'Export Excel' }}
+    </a>
+  </div>
+
+  <!-- Table -->
+  <div class="card" style="overflow:hidden;">
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead>
+          <tr style="background:var(--bg-muted);border-bottom:1px solid var(--border-color);">
+            <th style="padding:11px 16px;text-align:start;font-weight:700;color:var(--text-faint);font-size:11px;text-transform:uppercase;letter-spacing:0.06em;white-space:nowrap;">
+              {{ lang == 'ar' and 'التاريخ' or 'Date' }}
+            </th>
+            <th style="padding:11px 16px;text-align:start;font-weight:700;color:var(--text-faint);font-size:11px;text-transform:uppercase;letter-spacing:0.06em;">
+              {{ lang == 'ar' and 'الموظف' or 'Agent' }}
+            </th>
+            <th style="padding:11px 16px;text-align:start;font-weight:700;color:var(--text-faint);font-size:11px;text-transform:uppercase;letter-spacing:0.06em;">
+              {{ lang == 'ar' and 'المتصل' or 'Caller' }}
+            </th>
+            {% for field in fields %}
+            <th style="padding:11px 16px;text-align:start;font-weight:700;color:var(--text-faint);font-size:11px;text-transform:uppercase;letter-spacing:0.06em;white-space:nowrap;">
+              {{ field.label_ar if lang == 'ar' else field.label_en }}
+            </th>
+            {% endfor %}
+            <th style="padding:11px 16px;text-align:start;font-weight:700;color:var(--text-faint);font-size:11px;text-transform:uppercase;letter-spacing:0.06em;">
+              {{ lang == 'ar' and 'النتيجة' or 'Outcome' }}
+            </th>
+            <th style="padding:11px 16px;text-align:start;font-weight:700;color:var(--text-faint);font-size:11px;text-transform:uppercase;letter-spacing:0.06em;">
+              {{ lang == 'ar' and 'ملاحظات' or 'Notes' }}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for log in logs %}
+          <tr style="border-bottom:1px solid var(--border-color);transition:background 0.1s;"
+              onmouseover="this.style.background='var(--bg-muted)'" onmouseout="this.style.background=''">
+            <td style="padding:10px 16px;color:var(--text-faint);white-space:nowrap;">{{ log.created_at }}</td>
+            <td style="padding:10px 16px;font-weight:600;color:var(--text-ink);">{{ log.agent }}</td>
+            <td style="padding:10px 16px;color:var(--text-ink);">
+              {% if log.caller != '—' %}
+              <span style="display:inline-flex;align-items:center;gap:6px;">
+                <span style="width:26px;height:26px;border-radius:50%;background:rgba(0,174,239,0.12);
+                             display:inline-flex;align-items:center;justify-content:center;
+                             font-weight:800;font-size:11px;color:#00AEEF;flex-shrink:0;">
+                  {{ log.caller[0] }}
+                </span>
+                {{ log.caller }}
+              </span>
+              {% else %}
+              <span style="color:var(--text-faint);">—</span>
+              {% endif %}
+            </td>
+            {% for field in fields %}
+            <td style="padding:10px 16px;color:var(--text-ink);max-width:200px;">
+              {% set val = log.reason_data.get(field.id, '') %}
+              {% if val is iterable and val is not string %}
+                <span style="font-size:12px;">{{ val | join(', ') }}</span>
+              {% elif val %}
+                <span style="font-size:12px;">{{ val }}</span>
+              {% else %}
+                <span style="color:var(--text-faint);">—</span>
+              {% endif %}
+            </td>
+            {% endfor %}
+            <td style="padding:10px 16px;">
+              {% set outcome_map = {'resolved': ('محلول', '#10B981'), 'followup': ('متابعة', '#F59E0B'), 'ticket': ('تذكرة', '#3B82F6')} %}
+              {% if log.outcome == 'resolved' %}
+                <span style="padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;background:rgba(16,185,129,0.1);color:#10B981;">
+                  {{ lang == 'ar' and 'تم الحل' or 'Resolved' }}
+                </span>
+              {% elif log.outcome == 'followup' %}
+                <span style="padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;background:rgba(245,158,11,0.1);color:#F59E0B;">
+                  {{ lang == 'ar' and 'متابعة' or 'Follow-up' }}
+                </span>
+              {% elif log.outcome == 'ticket' %}
+                <span style="padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;background:rgba(59,130,246,0.1);color:#3B82F6;">
+                  {{ lang == 'ar' and 'تذكرة' or 'Ticket' }}
+                </span>
+              {% else %}
+                <span style="color:var(--text-faint);">{{ log.outcome }}</span>
+              {% endif %}
+            </td>
+            <td style="padding:10px 16px;color:var(--text-muted);font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+              {{ log.notes or '—' }}
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="{{ 5 + fields|length }}" style="padding:40px;text-align:center;color:var(--text-faint);">
+              <div style="font-size:32px;margin-bottom:8px;">📞</div>
+              <p>{{ lang == 'ar' and 'لا توجد سجلات مكالمات بعد' or 'No call logs yet' }}</p>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Pagination -->
+  {% if total_pages > 1 %}
+  <div style="display:flex;align-items:center;justify-content:center;gap:6px;">
+    {% if page > 1 %}
+    <a href="?page={{ page - 1 }}" style="padding:6px 14px;border-radius:8px;border:1px solid var(--border-color);
+       color:var(--text-muted);text-decoration:none;font-size:13px;font-weight:600;">
+      {{ lang == 'ar' and '→' or '←' }}
+    </a>
+    {% endif %}
+    {% for p in range(1, total_pages + 1) %}
+    <a href="?page={{ p }}"
+       style="padding:6px 12px;border-radius:8px;border:1px solid {{ '#00AEEF' if p == page else 'var(--border-color)' }};
+              color:{{ '#00AEEF' if p == page else 'var(--text-muted)' }};
+              background:{{ 'rgba(0,174,239,0.08)' if p == page else 'transparent' }};
+              text-decoration:none;font-size:13px;font-weight:700;">{{ p }}</a>
+    {% endfor %}
+    {% if page < total_pages %}
+    <a href="?page={{ page + 1 }}" style="padding:6px 14px;border-radius:8px;border:1px solid var(--border-color);
+       color:var(--text-muted);text-decoration:none;font-size:13px;font-weight:600;">
+      {{ lang == 'ar' and '←' or '→' }}
+    </a>
+    {% endif %}
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

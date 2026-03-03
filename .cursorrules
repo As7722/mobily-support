@@ -1,0 +1,39 @@
+# Mobily Tech Support System — Cursor Rules
+
+## Tech Stack
+- Backend: FastAPI 0.115+ (Python 3.12, Async)
+- ORM: SQLAlchemy 2.0 Async + Alembic
+- Validation: Pydantic v2
+- Frontend: HTMX 2.0 + Alpine.js + Tailwind CSS 4 + Jinja2
+- Database: PostgreSQL 16.4
+- Cache: Redis 7.2
+- Task Queue: Celery 5.4 + Celery Beat
+- Real-time: Server-Sent Events (SSE)
+- Auth: OAuth2 + JWT RS256 + Argon2id
+
+## Critical Rules — Follow Always
+1. ALL text in UI must use t("key", lang=lang) — NEVER hardcode Arabic or English text
+2. ALL user-facing DB fields need BOTH _ar AND _en columns (e.g., name_ar, name_en)
+3. HTML templates ALWAYS have lang="{{ lang }}" dir="{{ dir }}" on <html> tag
+4. Use Tailwind ps/pe/ms/me instead of pl/pr/ml/mr (RTL-safe)
+5. ALL database queries use SQLAlchemy async — NEVER raw SQL with user input
+6. ALL timestamps use TIMESTAMPTZ (timezone-aware)
+7. ALL primary keys are UUID (gen_random_uuid())
+8. Soft delete pattern: deleted_at TIMESTAMPTZ (never hard delete)
+9. Every ticket action creates a ticket_timeline entry (immutable)
+10. Every config change creates an audit_log entry (immutable, no delete/update)
+
+## File Structure
+- app/api/       → Route handlers
+- app/models/    → SQLAlchemy models
+- app/schemas/   → Pydantic schemas
+- app/services/  → Business logic
+- app/i18n/      → ar.json + en.json translations
+- app/templates/ → Jinja2 HTML templates
+- app/static/    → CSS + JS assets
+
+## Response Format
+- Always show the FULL file path before code
+- Always show which file to create/modify
+- Async functions everywhere (async def)
+- Type hints on every function

@@ -1,0 +1,760 @@
+{% extends "base_app.html" %}
+{% block title %}{{ t('dash.title', lang=lang) }} — موبايلي{% endblock %}
+{% block page_title %}{{ t('dash.title', lang=lang) }}{% endblock %}
+
+{% block extra_head %}
+<style>
+/* ═══════════════════════════════════════════════════════
+   DASHBOARD — Clean overview / analytics only
+═══════════════════════════════════════════════════════ */
+
+/* ── Power-BI style KPI strip ── */
+.dash-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+@media (max-width: 960px)  { .dash-kpi-strip { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 520px)  { .dash-kpi-strip { grid-template-columns: 1fr; } }
+
+.kpi-card {
+  position: relative; overflow: hidden;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 20px 20px 16px;
+  display: flex; flex-direction: column; gap: 14px;
+  transition: transform 0.18s, box-shadow 0.18s;
+  cursor: default;
+}
+.kpi-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.12);
+}
+/* Coloured top accent bar */
+.kpi-card::before {
+  content: '';
+  position: absolute; top: 0; inset-inline-start: 0; inset-inline-end: 0;
+  height: 3px;
+  border-radius: 14px 14px 0 0;
+}
+.kpi-card.accent-green::before  { background: linear-gradient(90deg,#10B981,#34D399); }
+.kpi-card.accent-blue::before   { background: linear-gradient(90deg,#3B82F6,#60A5FA); }
+.kpi-card.accent-amber::before  { background: linear-gradient(90deg,#F59E0B,#FCD34D); }
+.kpi-card.accent-cyan::before   { background: linear-gradient(90deg,#00AEEF,#38BDF8); }
+
+.kpi-card-header {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.kpi-card-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--text-faint);
+}
+.kpi-card-icon {
+  width: 34px; height: 34px; border-radius: 9px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.kpi-card-icon svg { width: 17px; height: 17px; }
+
+.kpi-card-body {
+  display: flex; align-items: flex-end; gap: 10px;
+}
+.kpi-main-val {
+  font-size: 2.25rem; font-weight: 900; line-height: 1;
+  letter-spacing: -0.03em;
+}
+.kpi-unit {
+  font-size: 13px; font-weight: 600; padding-bottom: 4px;
+  color: var(--text-muted);
+}
+.kpi-trend {
+  margin-inline-start: auto; display: flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 700; padding: 3px 8px;
+  border-radius: 20px;
+}
+.kpi-trend.up   { background: rgba(16,185,129,0.1); color: #10B981; }
+.kpi-trend.down { background: rgba(239,68,68,0.1);  color: #EF4444; }
+.kpi-trend.flat { background: rgba(148,163,184,0.1);color: #94A3B8; }
+
+/* Progress bar at bottom */
+.kpi-bar-track {
+  height: 4px; border-radius: 99px;
+  background: var(--bg-muted);
+  overflow: hidden;
+  margin-top: 2px;
+}
+.kpi-bar-fill {
+  height: 100%; border-radius: 99px;
+  transition: width 1s cubic-bezier(.4,0,.2,1);
+}
+
+/* Star visualizer */
+.kpi-stars { display: flex; gap: 3px; margin-top: 2px; }
+.kpi-star  { font-size: 13px; line-height: 1; }
+
+/* Workload ring */
+.kpi-ring-wrap {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 2px;
+}
+.kpi-ring-val { font-size: 12px; font-weight: 700; color: var(--text-muted); }
+
+/* Spinner */
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Call log modal step transitions */
+[x-cloak] { display: none !important; }
+
+/* Welcome hero */
+.dash-hero {
+  background: var(--bg-card); border: 1px solid var(--border-color);
+  border-radius: 12px; padding: 24px 28px;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 20px;
+}
+.dash-hero-text h2 { font-size: 20px; font-weight: 800; color: var(--text-ink); }
+.dash-hero-text p { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+
+.qa-card {
+  background: var(--bg-card); border: 1px solid var(--border-color);
+  border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 14px;
+  max-width: 380px;
+}
+
+</style>
+{% endblock %}
+
+{% block content %}
+{% set user = request.state.user if request.state.user else {} %}
+{% set uname = user.get('full_name_ar', '') if lang == 'ar' else user.get('full_name_en', user.get('full_name_ar', '')) %}
+{% set user_role = user.get('role', 'employee') %}
+
+<div class="p-5 space-y-5"
+     x-data="{
+       callLogOpen: false,
+       callOutcome: 'resolved',
+       callNotes: '',
+       reasonFields: [],
+       reasonAnswers: {},
+       callerQuery: '', callerResults: [], callerUser: null, callerDropOpen: false,
+       submitting: false, submitDone: false, createdTicket: null,
+       formStep: 1,
+       formError: '',
+       async openCallLog() {
+         this.callLogOpen = true;
+         this.submitDone = false; this.reasonAnswers = {};
+         this.callerQuery = ''; this.callerResults = [];
+         this.callerUser = null; this.callNotes = '';
+         this.callOutcome = 'resolved';
+         this.formError = '';
+         this.createdTicket = null;
+         const r = await fetch('/api/call-reason-config');
+         const d = await r.json();
+         this.reasonFields = d.fields || [];
+         this.reasonAnswers = {};
+         this.reasonFields.forEach(f => {
+           this.reasonAnswers[f.id] = f.type === 'checkbox' ? [] : '';
+         });
+       },
+       async searchCallers() {
+         if(this.callerQuery.length < 2){ this.callerResults = []; this.callerDropOpen = false; return; }
+         const r = await fetch('/api/branch-employees/search?q=' + encodeURIComponent(this.callerQuery));
+         this.callerResults = await r.json();
+         this.callerDropOpen = this.callerResults.length > 0;
+       },
+       selectCaller(u) {
+         this.callerUser = u;
+         this.callerQuery = u.name_ar || u.name_en;
+         this.callerDropOpen = false;
+         this.formError = '';
+       },
+       toggleCheck(fieldId, opt) {
+         const arr = this.reasonAnswers[fieldId] || [];
+         const idx = arr.indexOf(opt);
+         if(idx === -1) arr.push(opt);
+         else arr.splice(idx, 1);
+         this.reasonAnswers[fieldId] = arr;
+       },
+       isChecked(fieldId, opt) {
+         return (this.reasonAnswers[fieldId] || []).includes(opt);
+       },
+       validateAndSubmit() {
+         this.formError = '';
+         if(!this.callerUser) {
+           this.formStep = 1;
+           this.formError = '{{ lang == 'ar' and 'يرجى اختيار المتصل أولاً' or 'Please select a caller first' }}';
+           return;
+         }
+         if(this.callOutcome !== 'resolved' && !this.callNotes.trim()) {
+           this.formError = '{{ lang == 'ar' and 'الملاحظات مطلوبة عند اختيار متابعة أو إنشاء تذكرة' or 'Notes are required for follow-up or ticket creation' }}';
+           return;
+         }
+         this.submitLog();
+       },
+       async submitLog() {
+         this.submitting = true;
+         const fd = new FormData();
+         fd.append('outcome', this.callOutcome);
+         fd.append('reason_data', JSON.stringify(this.reasonAnswers));
+         if(this.callerUser) fd.append('branch_employee_id', this.callerUser.id);
+         if(this.callNotes) fd.append('notes', this.callNotes);
+         const r = await fetch('/api/call-log', { method: 'POST', body: fd });
+         const d = await r.json();
+         this.submitting = false;
+         if(d.ok){
+           this.createdTicket = d.ticket_number || null;
+           this.submitDone = true;
+           setTimeout(() => { this.callLogOpen = false; this.submitDone = false; this.createdTicket = null; }, 4000);
+         }
+       }
+     }"
+     @keydown.ctrl.k.window.prevent="openCallLog()">
+
+  <!-- ════ WELCOME HERO ═══════════════════════════════════════ -->
+  <div class="dash-hero">
+    <div class="dash-hero-text">
+      <h2>{{ lang == 'ar' and 'مرحباً' or 'Welcome' }}{% if employee_name %}<span style="color:var(--accent-cyan);"> {{ employee_name }}</span>{% endif %}</h2>
+      <p>{{ lang == 'ar' and 'نظرة عامة على أدائك ومؤشراتك' or 'Your performance overview at a glance' }}</p>
+    </div>
+  </div>
+
+  <!-- ════ KPI STRIP — Power BI Style ═══════════════════════════ -->
+  {%- set sla_color = '#10B981' if kpis.sla_compliance_pct >= 90 else ('#F59E0B' if kpis.sla_compliance_pct >= 75 else '#EF4444') -%}
+  {%- set sla_bar_color = 'linear-gradient(90deg,#10B981,#34D399)' if kpis.sla_compliance_pct >= 90 else ('linear-gradient(90deg,#F59E0B,#FCD34D)' if kpis.sla_compliance_pct >= 75 else 'linear-gradient(90deg,#EF4444,#F87171)') -%}
+  {%- set csat_val = kpis.csat_avg if kpis.csat_avg else 0 -%}
+  {%- set csat_pct = (csat_val / 5 * 100)|int -%}
+  {%- set workload = kpis.workload -%}
+  {%- set rank = kpis.rank -%}
+  {%- set total_peers = kpis.total_peers -%}
+
+  <div class="dash-kpi-strip">
+
+    <!-- 1. Resolved Today -->
+    <div class="kpi-card accent-green">
+      <div class="kpi-card-header">
+        <span class="kpi-card-label">{{ t('stats.resolved_today', lang=lang) }}</span>
+        <div class="kpi-card-icon" style="background:rgba(16,185,129,0.12);">
+          <svg style="color:#10B981;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+      </div>
+      <div class="kpi-card-body">
+        <span class="kpi-main-val" style="color:#10B981;">{{ kpis.resolved_today }}</span>
+        <span class="kpi-unit">{{ t('kpi.tickets', lang=lang) }}</span>
+        {% if kpis.resolved_today > 0 %}
+        <span class="kpi-trend up" style="margin-inline-start:auto;">
+          <svg width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M4.5 15.75l7.5-7.5 7.5 7.5"/></svg>
+          {{ t('kpi.active', lang=lang) }}
+        </span>
+        {% else %}
+        <span class="kpi-trend flat" style="margin-inline-start:auto;">—</span>
+        {% endif %}
+      </div>
+      <!-- workload mini-bar: show active tickets out of an assumed max of 20 -->
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:5px;">
+          <span style="font-size:11px;color:var(--text-faint);">{{ t('kpi.workload_active', lang=lang) }}</span>
+          <span style="font-size:11px;font-weight:700;color:var(--text-muted);">{{ workload }} {{ t('kpi.open', lang=lang) }}</span>
+        </div>
+        <div class="kpi-bar-track">
+          <div class="kpi-bar-fill" style="width:{{ [workload / 20 * 100, 100]|min|int }}%;background:linear-gradient(90deg,#10B981,#34D399);"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. Avg Resolution Time -->
+    <div class="kpi-card accent-blue">
+      <div class="kpi-card-header">
+        <span class="kpi-card-label">{{ t('stats.avg_resolution_time', lang=lang) }}</span>
+        <div class="kpi-card-icon" style="background:rgba(59,130,246,0.12);">
+          <svg style="color:#3B82F6;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+      </div>
+      <div class="kpi-card-body">
+        {% if kpis.avg_resolution_mins >= 60 %}
+          {%- set hrs = (kpis.avg_resolution_mins // 60) -%}
+          {%- set mins = (kpis.avg_resolution_mins % 60) -%}
+          <span class="kpi-main-val" style="color:#3B82F6;">{{ hrs }}</span>
+          <span class="kpi-unit">{{ t('time.hours', lang=lang) }}</span>
+          <span class="kpi-main-val" style="color:#60A5FA;font-size:1.5rem;">{{ mins }}</span>
+          <span class="kpi-unit">{{ t('time.minutes', lang=lang) }}</span>
+        {% else %}
+          <span class="kpi-main-val" style="color:#3B82F6;">{{ kpis.avg_resolution_mins }}</span>
+          <span class="kpi-unit">{{ t('time.minutes', lang=lang) }}</span>
+        {% endif %}
+        {% if kpis.avg_resolution_mins <= 60 %}
+        <span class="kpi-trend up" style="margin-inline-start:auto;">
+          <svg width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M4.5 15.75l7.5-7.5 7.5 7.5"/></svg>
+          {{ t('kpi.fast', lang=lang) }}
+        </span>
+        {% elif kpis.avg_resolution_mins <= 240 %}
+        <span class="kpi-trend flat" style="margin-inline-start:auto;">≈ {{ t('kpi.avg', lang=lang) }}</span>
+        {% else %}
+        <span class="kpi-trend down" style="margin-inline-start:auto;">
+          <svg width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/></svg>
+          {{ t('kpi.slow', lang=lang) }}
+        </span>
+        {% endif %}
+      </div>
+      <!-- This month label -->
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <span style="font-size:11px;color:var(--text-faint);">{{ t('kpi.this_month', lang=lang) }}</span>
+        <!-- Rank badge -->
+        <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;background:rgba(59,130,246,0.12);color:#3B82F6;">
+          #{{ rank }} / {{ total_peers }}
+        </span>
+      </div>
+      <div class="kpi-bar-track">
+        {%- set speed_pct = [100 - (kpis.avg_resolution_mins / 480 * 100)|int, 10]|max -%}
+        <div class="kpi-bar-fill" style="width:{{ speed_pct }}%;background:linear-gradient(90deg,#3B82F6,#60A5FA);"></div>
+      </div>
+    </div>
+
+    <!-- 3. Customer Satisfaction (CSAT) -->
+    <div class="kpi-card accent-amber">
+      <div class="kpi-card-header">
+        <span class="kpi-card-label">{{ t('stats.csat', lang=lang) }}</span>
+        <div class="kpi-card-icon" style="background:rgba(245,158,11,0.12);">
+          <svg style="color:#F59E0B;" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z"/>
+          </svg>
+        </div>
+      </div>
+      <div class="kpi-card-body">
+        <span class="kpi-main-val" style="color:#F59E0B;">{{ '%.1f'|format(csat_val) if kpis.csat_avg else '—' }}</span>
+        {% if kpis.csat_avg %}<span class="kpi-unit">/ 5</span>{% endif %}
+        {% if kpis.csat_avg %}
+          {% if csat_val >= 4.5 %}
+          <span class="kpi-trend up" style="margin-inline-start:auto;">★ {{ t('kpi.excellent', lang=lang) }}</span>
+          {% elif csat_val >= 3.5 %}
+          <span class="kpi-trend flat" style="margin-inline-start:auto;">{{ t('kpi.good', lang=lang) }}</span>
+          {% else %}
+          <span class="kpi-trend down" style="margin-inline-start:auto;">{{ t('kpi.needs_work', lang=lang) }}</span>
+          {% endif %}
+        {% endif %}
+      </div>
+      <!-- Star icons -->
+      <div>
+        <div class="kpi-stars">
+          {% for i in range(1,6) %}
+            {% if csat_val >= i %}
+              <span class="kpi-star" style="color:#F59E0B;">★</span>
+            {% elif csat_val >= i - 0.5 %}
+              <span class="kpi-star" style="color:#F59E0B;">½</span>
+            {% else %}
+              <span class="kpi-star" style="color:var(--bg-muted);">★</span>
+            {% endif %}
+          {% endfor %}
+        </div>
+        <div class="kpi-bar-track" style="margin-top:6px;">
+          <div class="kpi-bar-fill" style="width:{{ csat_pct }}%;background:linear-gradient(90deg,#F59E0B,#FCD34D);"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. SLA Compliance -->
+    <div class="kpi-card accent-cyan">
+      <div class="kpi-card-header">
+        <span class="kpi-card-label">{{ t('kpi.sla_compliance', lang=lang) }}</span>
+        <div class="kpi-card-icon" style="background:rgba(0,174,239,0.12);">
+          <svg style="color:#00AEEF;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/>
+          </svg>
+        </div>
+      </div>
+      <div class="kpi-card-body">
+        <span class="kpi-main-val" style="color:{{ sla_color }};">{{ kpis.sla_compliance_pct }}</span>
+        <span class="kpi-unit">%</span>
+        {% if kpis.sla_compliance_pct >= 90 %}
+        <span class="kpi-trend up" style="margin-inline-start:auto;">
+          <svg width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M4.5 15.75l7.5-7.5 7.5 7.5"/></svg>
+          {{ t('kpi.on_track', lang=lang) }}
+        </span>
+        {% elif kpis.sla_compliance_pct >= 75 %}
+        <span class="kpi-trend flat" style="margin-inline-start:auto;">{{ t('kpi.at_risk', lang=lang) }}</span>
+        {% else %}
+        <span class="kpi-trend down" style="margin-inline-start:auto;">
+          <svg width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/></svg>
+          {{ t('kpi.breached', lang=lang) }}
+        </span>
+        {% endif %}
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:5px;">
+          <span style="font-size:11px;color:var(--text-faint);">{{ t('kpi.target', lang=lang) }}: 90%</span>
+          <span style="font-size:11px;font-weight:700;color:{{ sla_color }};">
+            {% if kpis.sla_compliance_pct >= 90 %}✓ {{ t('kpi.target_met', lang=lang) }}{% else %}{{ 90 - kpis.sla_compliance_pct|round(1) }}% {{ t('kpi.below_target', lang=lang) }}{% endif %}
+          </span>
+        </div>
+        <div class="kpi-bar-track">
+          <div class="kpi-bar-fill" style="width:{{ kpis.sla_compliance_pct }}%;background:{{ sla_bar_color }};"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ════ CALL LOG QUICK ACTION ══════════════════════════════════ -->
+  <div class="qa-card">
+    <div class="flex items-center gap-3">
+      <div style="width:40px;height:40px;border-radius:10px;background:#164E63;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <svg style="width:20px;height:20px;color:#00AEEF;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"/>
+        </svg>
+      </div>
+      <div>
+        <p class="text-sm font-bold" style="color:var(--text-ink);">{{ t('dash.call_log_drawer', lang=lang) }}</p>
+      </div>
+    </div>
+    <button @click="openCallLog()" class="btn-cyan" style="width:100%;">
+      <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.5v15m7.5-7.5h-15"/>
+      </svg>
+      {{ t('dash.call_log_drawer', lang=lang) }}
+    </button>
+  </div>
+
+  <!-- ════ CALL LOG MODAL ════════════════════════════════════════ -->
+  <div x-show="callLogOpen"
+       x-transition:enter="transition ease-out duration-200"
+       x-transition:enter-start="opacity-0"
+       x-transition:enter-end="opacity-100"
+       x-transition:leave="transition ease-in duration-150"
+       x-transition:leave-start="opacity-100"
+       x-transition:leave-end="opacity-0"
+       class="modal-overlay" style="display:none;" @click.self="callLogOpen = false"
+       @keydown.escape.window="callLogOpen = false">
+    <!-- Modal Panel -->
+    <div @click.stop
+         style="width:100%;max-width:440px;border-radius:16px;overflow:hidden;
+                background:#0d1829;border:1px solid rgba(255,255,255,0.08);
+                box-shadow:0 24px 60px rgba(0,0,0,0.75);">
+
+      <!-- Header -->
+      <div style="display:flex;align-items:center;justify-content:space-between;
+                  padding:16px 20px;border-bottom:1px solid rgba(255,255,255,0.06);">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="width:32px;height:32px;border-radius:8px;background:rgba(0,174,239,0.15);
+                       display:flex;align-items:center;justify-content:center;">
+            <svg style="width:16px;height:16px;color:#00AEEF;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"/>
+            </svg>
+          </span>
+          <span style="font-size:14px;font-weight:700;color:#e2e8f0;">
+            {{ lang == 'ar' and 'تسجيل مكالمة' or 'Log a Call' }}
+          </span>
+        </div>
+        <button @click="callLogOpen=false" type="button"
+                style="width:28px;height:28px;border-radius:6px;border:none;cursor:pointer;
+                       background:rgba(255,255,255,0.05);color:rgba(255,255,255,0.4);
+                       display:flex;align-items:center;justify-content:center;transition:background 0.12s;"
+                onmouseover="this.style.background='rgba(255,255,255,0.1)'"
+                onmouseout="this.style.background='rgba(255,255,255,0.05)'">
+          <svg style="width:13px;height:13px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- SUCCESS -->
+      <div x-show="submitDone" style="padding:36px 24px;text-align:center;">
+        <div style="width:52px;height:52px;border-radius:50%;background:rgba(16,185,129,0.12);
+                    border:1.5px solid rgba(16,185,129,0.35);display:flex;align-items:center;
+                    justify-content:center;margin:0 auto 14px;">
+          <svg style="width:24px;height:24px;color:#10B981;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4.5 12.75l6 6 9-13.5"/>
+          </svg>
+        </div>
+        <p style="font-size:15px;font-weight:700;color:#10B981;margin-bottom:4px;">
+          {{ lang == 'ar' and 'تم الحفظ' or 'Saved' }}
+        </p>
+        <p style="font-size:12px;color:rgba(255,255,255,0.35);">
+          {{ lang == 'ar' and 'تم تسجيل المكالمة بنجاح' or 'Call recorded successfully' }}
+        </p>
+        <template x-if="createdTicket">
+          <div style="margin-top:16px;padding:12px 16px;border-radius:10px;
+                      background:rgba(0,174,239,0.07);border:1px solid rgba(0,174,239,0.2);">
+            <p style="font-size:11px;color:rgba(255,255,255,0.35);margin-bottom:5px;">
+              {{ lang == 'ar' and 'تذكرة داخلية أُنشئت' or 'Internal ticket created' }}
+            </p>
+            <p style="font-size:18px;font-weight:800;color:#00AEEF;letter-spacing:0.04em;font-family:monospace;"
+               x-text="createdTicket"></p>
+            <a :href="'/tickets?q='+createdTicket"
+               style="display:inline-block;margin-top:8px;font-size:12px;font-weight:600;
+                      color:#00AEEF;text-decoration:underline;text-underline-offset:2px;">
+              {{ lang == 'ar' and 'فتح التذكرة ←' or 'Open ticket →' }}
+            </a>
+          </div>
+        </template>
+      </div>
+
+      <!-- FORM -->
+      <div x-show="!submitDone" style="padding:18px 20px;display:flex;flex-direction:column;gap:14px;max-height:72vh;overflow-y:auto;">
+
+        <!-- Error -->
+        <div x-show="formError" x-transition
+             style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;
+                    background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);">
+          <svg style="width:14px;height:14px;color:#EF4444;flex-shrink:0;" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a.75.75 0 01.75.75v4.5a.75.75 0 01-1.5 0v-4.5A.75.75 0 0110 5zm0 10a1 1 0 100-2 1 1 0 000 2z"/>
+          </svg>
+          <span style="font-size:12px;color:#EF4444;font-weight:600;" x-text="formError"></span>
+        </div>
+
+        <!-- ① Caller -->
+        <div>
+          <div style="display:flex;align-items:center;gap:5px;margin-bottom:6px;">
+            <span style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.05em;">
+              {{ lang == 'ar' and 'المتصل' or 'Caller' }}
+            </span>
+            <span style="font-size:10px;color:#EF4444;font-weight:600;">*</span>
+          </div>
+
+          <!-- Selected user pill -->
+          <div x-show="callerUser" x-transition
+               style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:9px;
+                      background:rgba(0,174,239,0.08);border:1px solid rgba(0,174,239,0.22);margin-bottom:6px;">
+            <div style="width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#0c4a6e,#0ea5e9);
+                        display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:#fff;flex-shrink:0;"
+                 x-text="callerUser && callerUser.name_ar ? callerUser.name_ar[0] : '?'"></div>
+            <div style="flex:1;min-width:0;">
+              <p style="font-size:13px;font-weight:700;color:#38bdf8;" x-text="callerUser && callerUser.name_ar"></p>
+              <p style="font-size:11px;color:rgba(255,255,255,0.38);margin-top:1px;"
+                 x-text="callerUser && ((callerUser.employee_id?'#'+callerUser.employee_id:'') + (callerUser.branch?' · '+callerUser.branch:''))"></p>
+            </div>
+            <button @click="callerUser=null;callerQuery=''" type="button"
+                    style="width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,0.08);
+                           border:none;cursor:pointer;color:rgba(255,255,255,0.4);font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center;">×</button>
+          </div>
+
+          <!-- Search -->
+          <div style="position:relative;">
+            <svg style="position:absolute;inset-inline-start:10px;top:50%;transform:translateY(-50%);
+                        width:14px;height:14px;color:rgba(255,255,255,0.25);pointer-events:none;"
+                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803 7.5 7.5 0 0016.803 15.803z"/>
+            </svg>
+            <input type="text" x-model="callerQuery" class="cl-search-inp"
+                   @input.debounce.250ms="searchCallers()"
+                   @focus="if(callerResults.length) callerDropOpen=true"
+                   x-show="!callerUser"
+                   style="width:100%;padding:9px 12px 9px 32px;border-radius:8px;box-sizing:border-box;
+                          background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);
+                          color:#e2e8f0;font-size:13px;outline:none;"
+                   placeholder="{{ lang == 'ar' and 'ابحث عن المتصل...' or 'Search caller...' }}"
+                   onfocus="this.style.borderColor='rgba(0,174,239,0.5)'"
+                   onblur="this.style.borderColor='rgba(255,255,255,0.1)'">
+          </div>
+
+          <!-- Dropdown results -->
+          <div x-show="callerDropOpen && !callerUser" @click.outside="callerDropOpen=false"
+               style="position:fixed;z-index:9999;border-radius:10px;overflow:hidden;
+                      background:#0d1829;border:1px solid rgba(0,174,239,0.25);
+                      box-shadow:0 12px 36px rgba(0,0,0,0.6);"
+               x-effect="if(callerDropOpen){ const el=document.querySelector('.cl-search-inp'); const r=el&&el.getBoundingClientRect(); if(r){ $el.style.top=(r.bottom+4)+'px'; $el.style.left=r.left+'px'; $el.style.width=r.width+'px'; } }">
+            <template x-if="callerResults.length === 0">
+              <div style="padding:14px 16px;font-size:12px;color:rgba(255,255,255,0.35);text-align:center;">
+                {{ lang == 'ar' and 'لا توجد نتائج' or 'No results found' }}
+              </div>
+            </template>
+            <template x-for="u in callerResults" :key="u.id">
+              <div @click="selectCaller(u)"
+                   style="display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;
+                          border-bottom:1px solid rgba(255,255,255,0.04);transition:background 0.1s;"
+                   onmouseover="this.style.background='rgba(0,174,239,0.07)'"
+                   onmouseout="this.style.background=''">
+                <div style="width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#0c4a6e,#0ea5e9);
+                            display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#fff;flex-shrink:0;"
+                     x-text="u.name_ar?u.name_ar[0]:'?'"></div>
+                <div style="flex:1;min-width:0;">
+                  <p style="font-size:13px;font-weight:600;color:#e2e8f0;" x-text="u.name_ar"></p>
+                  <p style="font-size:11px;color:rgba(255,255,255,0.35);margin-top:1px;"
+                     x-text="(u.employee_id?'#'+u.employee_id:'') + (u.position?' · '+u.position:'') + (u.branch?' — '+u.branch:'')"></p>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Divider -->
+        <div style="border-top:1px solid rgba(255,255,255,0.06);"></div>
+
+        <!-- ② Reason Fields -->
+        <template x-for="field in reasonFields" :key="field.id">
+          <div>
+            <label style="display:block;font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);
+                          text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;"
+                   x-text="field.label_ar"></label>
+            <template x-if="field.type==='text'">
+              <input type="text" :placeholder="field.label_ar" x-model="reasonAnswers[field.id]"
+                     style="width:100%;padding:9px 12px;border-radius:8px;box-sizing:border-box;
+                            background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);
+                            color:#e2e8f0;font-size:13px;outline:none;"
+                     onfocus="this.style.borderColor='rgba(0,174,239,0.5)'"
+                     onblur="this.style.borderColor='rgba(255,255,255,0.1)'">
+            </template>
+            <template x-if="field.type==='textarea'">
+              <textarea :placeholder="field.label_ar" x-model="reasonAnswers[field.id]" rows="2"
+                        style="width:100%;padding:9px 12px;border-radius:8px;box-sizing:border-box;
+                               background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);
+                               color:#e2e8f0;font-size:13px;outline:none;resize:none;"
+                        onfocus="this.style.borderColor='rgba(0,174,239,0.5)'"
+                        onblur="this.style.borderColor='rgba(255,255,255,0.1)'"></textarea>
+            </template>
+            <template x-if="field.type==='select'">
+              <select x-model="reasonAnswers[field.id]"
+                      style="width:100%;padding:9px 12px;border-radius:8px;box-sizing:border-box;
+                             background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);
+                             color:#e2e8f0;font-size:13px;outline:none;cursor:pointer;">
+                <option value="" style="background:#0d1829;">{{ lang == 'ar' and '— اختر —' or '— Select —' }}</option>
+                <template x-for="(opt,i) in field.options_ar" :key="i">
+                  <option :value="opt" x-text="opt" style="background:#0d1829;"></option>
+                </template>
+              </select>
+            </template>
+            <template x-if="field.type==='checkbox'">
+              <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                <template x-for="(opt,i) in field.options_ar" :key="i">
+                  <button type="button" @click="toggleCheck(field.id,opt)"
+                          :style="isChecked(field.id,opt)
+                                  ? 'background:rgba(0,174,239,0.15);border-color:rgba(0,174,239,0.5);color:#38bdf8;'
+                                  : 'background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);'"
+                          style="padding:6px 12px;border-radius:6px;border:1px solid;font-size:12px;font-weight:600;cursor:pointer;transition:all 0.12s;"
+                          x-text="opt"></button>
+                </template>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <!-- Divider before outcome -->
+        <div style="border-top:1px solid rgba(255,255,255,0.06);"></div>
+
+        <!-- ③ Outcome — pill tabs -->
+        <div>
+          <span style="display:block;font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);
+                       text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">
+            {{ lang == 'ar' and 'نتيجة المكالمة' or 'Outcome' }}
+          </span>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;">
+            <!-- Resolved -->
+            <button type="button" @click="callOutcome='resolved'"
+                    :style="callOutcome==='resolved'
+                            ? 'background:rgba(16,185,129,0.12);border-color:#10B981;color:#10B981;'
+                            : 'background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);'"
+                    style="padding:10px 6px;border-radius:8px;border:1px solid;cursor:pointer;
+                           transition:all 0.15s;display:flex;flex-direction:column;align-items:center;gap:5px;">
+              <svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4.5 12.75l6 6 9-13.5"/>
+              </svg>
+              <span style="font-size:11px;font-weight:700;">{{ lang == 'ar' and 'تم الحل' or 'Resolved' }}</span>
+            </button>
+            <!-- Follow-up -->
+            <button type="button" @click="callOutcome='followup'"
+                    :style="callOutcome==='followup'
+                            ? 'background:rgba(245,158,11,0.12);border-color:#F59E0B;color:#F59E0B;'
+                            : 'background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);'"
+                    style="padding:10px 6px;border-radius:8px;border:1px solid;cursor:pointer;
+                           transition:all 0.15s;display:flex;flex-direction:column;align-items:center;gap:5px;">
+              <svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              <span style="font-size:11px;font-weight:700;">{{ lang == 'ar' and 'متابعة' or 'Follow-up' }}</span>
+            </button>
+            <!-- Create Ticket -->
+            <button type="button" @click="callOutcome='ticket'"
+                    :style="callOutcome==='ticket'
+                            ? 'background:rgba(0,174,239,0.12);border-color:#00AEEF;color:#00AEEF;'
+                            : 'background:rgba(255,255,255,0.04);border-color:rgba(255,255,255,0.1);color:rgba(255,255,255,0.5);'"
+                    style="padding:10px 6px;border-radius:8px;border:1px solid;cursor:pointer;
+                           transition:all 0.15s;display:flex;flex-direction:column;align-items:center;gap:5px;">
+              <svg style="width:16px;height:16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M16.5 6v.75m0 3v.75m0 3v.75m0 3V18m-9-5.25h5.25M7.5 15h3M3.375 5.25c-.621 0-1.125.504-1.125 1.125v3.026a2.999 2.999 0 010 5.198v3.026c0 .621.504 1.125 1.125 1.125h17.25c.621 0 1.125-.504 1.125-1.125v-3.026a2.999 2.999 0 010-5.198V6.375c0-.621-.504-1.125-1.125-1.125H3.375z"/>
+              </svg>
+              <span style="font-size:11px;font-weight:700;">{{ lang == 'ar' and 'تذكرة' or 'Ticket' }}</span>
+            </button>
+          </div>
+          <!-- Context hint -->
+          <p x-show="callOutcome==='followup'"
+             style="font-size:11px;color:rgba(245,158,11,0.7);margin-top:6px;padding-inline-start:2px;">
+            ↳ {{ lang == 'ar' and 'سيتم إنشاء تذكرة CS-INT وتعيينها لك' or 'A CS-INT ticket will be created and assigned to you' }}
+          </p>
+          <p x-show="callOutcome==='ticket'"
+             style="font-size:11px;color:rgba(0,174,239,0.7);margin-top:6px;padding-inline-start:2px;">
+            ↳ {{ lang == 'ar' and 'سيتم إنشاء تذكرة CS-INT وتعيينها للمشرف' or 'A CS-INT ticket will be created and assigned to supervisor' }}
+          </p>
+        </div>
+
+        <!-- ④ Notes -->
+        <div>
+          <div style="display:flex;align-items:center;gap:4px;margin-bottom:6px;">
+            <span style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.05em;">
+              {{ lang == 'ar' and 'ملاحظات' or 'Notes' }}
+            </span>
+            <span x-show="callOutcome!=='resolved'" style="font-size:10px;color:#EF4444;font-weight:600;">*</span>
+            <span x-show="callOutcome==='resolved'" style="font-size:10px;color:rgba(255,255,255,0.2);">
+              {{ lang == 'ar' and '(اختياري)' or '(optional)' }}
+            </span>
+          </div>
+          <textarea x-model="callNotes" rows="3"
+                    :placeholder="callOutcome!=='resolved'
+                      ? '{{ lang == 'ar' and 'اكتب تفاصيل المشكلة أو سبب المتابعة...' or 'Describe the issue or reason...' }}'
+                      : '{{ lang == 'ar' and 'ملاحظات إضافية...' or 'Additional notes...' }}'"
+                    style="width:100%;padding:10px 12px;border-radius:8px;box-sizing:border-box;
+                           background:rgba(255,255,255,0.05);border:1.5px solid rgba(255,255,255,0.1);
+                           color:#e2e8f0;font-size:13px;outline:none;resize:none;line-height:1.6;
+                           font-family:inherit;transition:border-color 0.15s,box-shadow 0.15s;"
+                    :style="formError && callOutcome!=='resolved' && !callNotes.trim()
+                            ? 'border-color:rgba(239,68,68,0.5);box-shadow:0 0 0 3px rgba(239,68,68,0.1);'
+                            : ''"
+                    onfocus="this.style.borderColor='rgba(0,174,239,0.5)';this.style.boxShadow='0 0 0 3px rgba(0,174,239,0.12)'"
+                    onblur="this.style.borderColor='';this.style.boxShadow=''"></textarea>
+        </div>
+
+        <!-- Footer -->
+        <div style="display:flex;gap:8px;padding-top:4px;">
+          <button @click="callLogOpen=false" type="button"
+                  style="padding:11px 20px;border-radius:8px;background:rgba(255,255,255,0.05);
+                         border:1.5px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.55);
+                         font-size:13px;font-weight:700;cursor:pointer;transition:all 0.15s;
+                         white-space:nowrap;"
+                  onmouseover="this.style.background='rgba(255,255,255,0.09)';this.style.borderColor='rgba(255,255,255,0.18)'"
+                  onmouseout="this.style.background='rgba(255,255,255,0.05)';this.style.borderColor='rgba(255,255,255,0.1)'">
+            {{ lang == 'ar' and 'إلغاء' or 'Cancel' }}
+          </button>
+          <button @click="validateAndSubmit()" type="button" :disabled="submitting"
+                  style="flex:1;padding:11px 16px;border-radius:8px;border:none;cursor:pointer;
+                         font-size:13px;font-weight:800;letter-spacing:0.01em;
+                         display:flex;align-items:center;justify-content:center;gap:7px;
+                         background:linear-gradient(135deg,#00AEEF,#0090cc);color:#fff;
+                         box-shadow:0 3px 14px rgba(0,174,239,0.3);transition:all 0.15s;"
+                  :style="submitting ? 'opacity:0.55;cursor:not-allowed;box-shadow:none;' : ''"
+                  onmouseover="if(!this.disabled){this.style.opacity='0.88';this.style.transform='translateY(-1px)';}"
+                  onmouseout="this.style.opacity='1';this.style.transform='translateY(0)'">
+            <template x-if="submitting">
+              <svg style="width:14px;height:14px;animation:spin 0.8s linear infinite;" fill="none" viewBox="0 0 24 24">
+                <circle style="opacity:.2" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                <path style="opacity:.8" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+              </svg>
+            </template>
+            <svg x-show="!submitting" style="width:14px;height:14px;flex-shrink:0;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <span x-text="submitting ? '{{ lang == 'ar' and 'جارٍ الحفظ...' or 'Saving...' }}' : '{{ lang == 'ar' and 'حفظ المكالمة' or 'Save Call' }}'"></span>
+          </button>
+        </div>
+
+      </div><!-- /form -->
+    </div><!-- /panel -->
+  </div>
+
+</div><!-- end x-data -->
+
+{% endblock %}

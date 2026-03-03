@@ -1,0 +1,1038 @@
+{% extends "base_app.html" %}
+{% block title %}{{ t('mgr.settings_title', lang=lang) }} — موبايلي{% endblock %}
+{% block page_title %}{{ t('mgr.settings_title', lang=lang) }}{% endblock %}
+
+{% block extra_head %}
+{{ super() }}
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.3/Sortable.min.js" defer></script>
+{% endblock %}
+
+{% block content %}
+<script>
+window._activeFormSchema = {{ active_form_schema | tojson | safe }};
+</script>
+<div class="p-6"
+     x-data="{
+       activeTab: '{{ active_tab }}',
+       automationModal: false,
+       newRule: { name_ar: '', trigger: 'ticket_created', conditions: [], actions: [] }
+     }">
+
+  <!-- Tabs -->
+  <div class="flex gap-1 rounded-xl p-1 mb-6 shadow-sm overflow-x-auto" style="background: var(--bg-card); border: 1px solid var(--border-color);">
+    {% for tab_id, tab_key in [
+      ('form_builder', 'mgr.tab_form_builder'),
+      ('sla', 'mgr.tab_sla'),
+      ('automation', 'mgr.tab_automation'),
+      ('gamification', 'mgr.tab_gamification'),
+      ('audit', 'mgr.tab_audit'),
+      ('reports', 'mgr.tab_reports'),
+      ('notifications', 'mgr.tab_notifications'),
+      ('call_reasons', 'mgr.tab_call_reasons')
+    ] %}
+    <button @click="activeTab = '{{ tab_id }}'"
+            :class="activeTab === '{{ tab_id }}' ? 'bg-primary text-white shadow-sm' : 'hover:bg-gray-50 dark:hover:bg-gray-800'"
+            :style="activeTab !== '{{ tab_id }}' ? 'color: var(--text-muted);' : ''"
+            class="flex-shrink-0 rounded-lg px-3 py-2.5 text-sm font-semibold transition-all">
+      {{ t(tab_key, lang=lang) }}
+    </button>
+    {% endfor %}
+  </div>
+
+  <!-- ══ TAB: FORM BUILDER ════════════════════════════════════════════════ -->
+  <!-- ══ TAB: FORM BUILDER (Google Forms / JotForm style) ═════════════════ -->
+  <div x-show="activeTab === 'form_builder'" x-transition>
+    <div id="fb-root" x-data="formBuilder()" x-init="init()">
+
+      <!-- ── Top Actions Bar ── -->
+      <div class="card" style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#00AEEF,#0084b4);display:flex;align-items:center;justify-content:center;">
+            <svg style="width:18px;height:18px;color:#fff;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>
+          </div>
+          <div>
+            <h3 style="font-size:14px;font-weight:800;color:var(--text-ink);margin:0;">{{ lang == 'ar' and 'منشئ النماذج' or 'Form Builder' }}</h3>
+            <p style="font-size:11px;color:var(--text-muted);margin:0;" x-text="'v' + ver + ' — ' + fields.length + ' {{ lang == 'ar' and 'حقل' or 'fields' }}'"></p>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button @click="previewMode = !previewMode" class="btn-secondary" style="font-size:12px;padding:7px 14px;">
+            <span x-text="previewMode ? '{{ lang == 'ar' and '✏ تعديل' or '✏ Edit' }}' : '{{ lang == 'ar' and '👁 معاينة' or '👁 Preview' }}'"></span>
+          </button>
+          <button @click="publishForm()" :disabled="pub" class="btn-primary" style="font-size:12px;padding:7px 18px;background:linear-gradient(135deg,#10B981,#059669);border:none;">
+            <span x-show="!pub">{{ lang == 'ar' and '🚀 نشر' or '🚀 Publish' }}</span>
+            <span x-show="pub">...</span>
+          </button>
+        </div>
+      </div>
+      <div id="fb-msg" style="font-size:12px;font-weight:700;min-height:16px;margin-bottom:6px;"></div>
+
+      <!-- ── Editor: Each field is an inline-editable card (Google Forms style) ── -->
+      <div x-show="!previewMode" style="max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:12px;">
+
+        <!-- Section headers + fields rendered inline -->
+        <template x-for="(sec, si) in sections" :key="sec.id">
+          <div>
+            <!-- Section Header Card -->
+            <div class="card" style="padding:14px 18px;margin-bottom:8px;border-{{ lang == 'ar' and 'right' or 'left' }}:4px solid #00AEEF;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <input type="text" x-model="sec.title_ar" style="flex:1;font-size:15px;font-weight:700;color:var(--text-ink);background:transparent;border:none;border-bottom:2px solid transparent;outline:none;padding:4px 0;"
+                       :style="focusedSec === si ? 'border-color:#00AEEF;' : ''" @focus="focusedSec = si" @blur="focusedSec = -1"
+                       placeholder="{{ lang == 'ar' and 'اسم القسم...' or 'Section name...' }}">
+                <input type="text" x-model="sec.title_en" dir="ltr" style="width:160px;font-size:12px;color:var(--text-muted);background:transparent;border:none;border-bottom:1px dashed var(--border-color);outline:none;padding:4px 0;"
+                       placeholder="English title">
+                <button @click="removeSection(si)" style="color:var(--text-faint);cursor:pointer;border:none;background:none;font-size:16px;padding:4px;" title="{{ lang == 'ar' and 'حذف القسم' or 'Delete section' }}">✕</button>
+              </div>
+            </div>
+
+            <!-- Fields in this section -->
+            <div :id="'sec-fields-' + sec.id" style="display:flex;flex-direction:column;gap:8px;min-height:40px;">
+              <template x-for="(field, fi) in fields.filter(f => f.section === sec.id)" :key="field.id">
+                <div class="card" style="padding:0;overflow:hidden;transition:box-shadow .15s;"
+                     :style="sel === field.id ? 'box-shadow:0 0 0 2px #00AEEF;' : ''"
+                     @click="sel = field.id">
+
+                  <!-- Field Top Row (always visible) -->
+                  <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;">
+                    <span class="fd" style="cursor:grab;color:var(--text-faint);font-size:14px;user-select:none;flex-shrink:0;">⠿</span>
+                    <div style="flex:1;min-width:0;">
+                      <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;">
+                        <input type="text" x-model="field.label_ar"
+                               :placeholder="'{{ lang == 'ar' and 'اسم الحقل...' or 'Field name...' }}'"
+                               style="flex:1;font-size:13px;font-weight:700;color:var(--text-ink);background:transparent;border:none;outline:none;padding:2px 0;min-width:0;"
+                               @click.stop>
+                        <span style="font-size:10px;padding:2px 7px;border-radius:5px;background:rgba(0,174,239,0.1);color:#00AEEF;font-weight:700;font-family:monospace;flex-shrink:0;text-transform:uppercase;"
+                              x-text="field.type"></span>
+                      </div>
+                      <input type="text" x-model="field.label_en" dir="ltr"
+                             placeholder="English label"
+                             style="font-size:11px;color:var(--text-faint);background:transparent;border:none;outline:none;padding:0;width:100%;"
+                             @click.stop>
+                    </div>
+                    <!-- Quick toggles -->
+                    <label style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--text-muted);cursor:pointer;flex-shrink:0;" @click.stop>
+                      <input type="checkbox" x-model="field.required" style="accent-color:#EF4444;cursor:pointer;width:14px;height:14px;">
+                      {{ lang == 'ar' and 'إلزامي' or 'Required' }}
+                    </label>
+                    <button @click.stop="duplicateField(field)" style="color:var(--text-faint);cursor:pointer;border:none;background:none;font-size:14px;padding:4px;" title="{{ lang == 'ar' and 'نسخ' or 'Duplicate' }}">⧉</button>
+                    <button @click.stop="removeField(field.id)" style="color:#EF4444;cursor:pointer;border:none;background:none;font-size:14px;padding:4px;" title="{{ lang == 'ar' and 'حذف' or 'Delete' }}">✕</button>
+                  </div>
+
+                  <!-- Expanded Properties (when selected) -->
+                  <div x-show="sel === field.id" x-transition @click.stop
+                       style="padding:0 16px 16px 16px;border-top:1px solid var(--border-color);">
+
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:12px;">
+                      <div>
+                        <label style="font-size:10px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:2px;">{{ lang == 'ar' and 'النوع' or 'Type' }}</label>
+                        <select x-model="field.type" class="form-input" style="font-size:11px;padding:5px 8px;">
+                          <option value="text">{{ lang == 'ar' and 'نص قصير' or 'Short Text' }}</option>
+                          <option value="textarea">{{ lang == 'ar' and 'نص طويل' or 'Long Text' }}</option>
+                          <option value="number">{{ lang == 'ar' and 'رقم' or 'Number' }}</option>
+                          <option value="tel">{{ lang == 'ar' and 'هاتف' or 'Phone' }}</option>
+                          <option value="email">{{ lang == 'ar' and 'بريد' or 'Email' }}</option>
+                          <option value="select">{{ lang == 'ar' and 'قائمة منسدلة' or 'Dropdown' }}</option>
+                          <option value="multi_select">{{ lang == 'ar' and 'اختيار متعدد' or 'Multi Select' }}</option>
+                          <option value="checkbox">{{ lang == 'ar' and 'خانة اختيار' or 'Checkbox' }}</option>
+                          <option value="radio">{{ lang == 'ar' and 'اختيار واحد' or 'Radio' }}</option>
+                          <option value="date">{{ lang == 'ar' and 'تاريخ' or 'Date' }}</option>
+                          <option value="time">{{ lang == 'ar' and 'وقت' or 'Time' }}</option>
+                          <option value="file">{{ lang == 'ar' and 'ملف' or 'File' }}</option>
+                          <option value="heading">{{ lang == 'ar' and 'عنوان' or 'Heading' }}</option>
+                          <option value="divider">{{ lang == 'ar' and 'فاصل' or 'Divider' }}</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label style="font-size:10px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:2px;">{{ lang == 'ar' and 'المعرّف' or 'Key' }}</label>
+                        <input type="text" x-model="field.key" dir="ltr" class="form-input" style="font-size:11px;padding:5px 8px;font-family:monospace;">
+                      </div>
+                      <div>
+                        <label style="font-size:10px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:2px;">{{ lang == 'ar' and 'القسم' or 'Section' }}</label>
+                        <select x-model="field.section" class="form-input" style="font-size:11px;padding:5px 8px;">
+                          <template x-for="s in sections" :key="s.id">
+                            <option :value="s.id" x-text="s.title_ar"></option>
+                          </template>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;">
+                      <div>
+                        <label style="font-size:10px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:2px;">{{ lang == 'ar' and 'نص توضيحي (عربي)' or 'Placeholder AR' }}</label>
+                        <input type="text" x-model="field.placeholder_ar" class="form-input" style="font-size:11px;padding:5px 8px;">
+                      </div>
+                      <div>
+                        <label style="font-size:10px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:2px;">{{ lang == 'ar' and 'نص توضيحي (إنجليزي)' or 'Placeholder EN' }}</label>
+                        <input type="text" x-model="field.placeholder_en" dir="ltr" class="form-input" style="font-size:11px;padding:5px 8px;">
+                      </div>
+                    </div>
+
+                    <!-- Quick toggles row -->
+                    <div style="display:flex;gap:14px;margin-top:10px;flex-wrap:wrap;">
+                      <label style="display:flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--text-ink);cursor:pointer;">
+                        <input type="checkbox" x-model="field.half_width" style="accent-color:#00AEEF;cursor:pointer;"> {{ lang == 'ar' and 'نصف العرض' or 'Half Width' }}
+                      </label>
+                    </div>
+
+                    <!-- Options editor (for select/radio/checkbox/multi_select) -->
+                    <template x-if="['select','multi_select','radio','checkbox'].includes(field.type)">
+                      <div style="margin-top:12px;padding:12px;border-radius:10px;background:var(--bg-surface);border:1px solid var(--border-color);">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                          <span style="font-size:11px;font-weight:700;color:var(--text-ink);">{{ lang == 'ar' and 'الخيارات' or 'Options' }}</span>
+                          <button @click="field.options = (field.options || []).concat([{value:'o'+Date.now(),label_ar:'',label_en:''}])"
+                                  style="font-size:10px;font-weight:700;padding:3px 10px;border-radius:6px;cursor:pointer;border:1px solid rgba(0,174,239,.3);background:rgba(0,174,239,.06);color:#00AEEF;">
+                            + {{ lang == 'ar' and 'إضافة' or 'Add' }}
+                          </button>
+                        </div>
+                        <template x-for="(opt, oi) in (field.options || [])" :key="oi">
+                          <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px;">
+                            <span style="font-size:10px;color:var(--text-faint);width:16px;text-align:center;" x-text="oi+1"></span>
+                            <input type="text" x-model="opt.label_ar" placeholder="{{ lang == 'ar' and 'عربي' or 'AR' }}" class="form-input" style="flex:1;font-size:11px;padding:5px 8px;">
+                            <input type="text" x-model="opt.label_en" placeholder="EN" dir="ltr" class="form-input" style="flex:1;font-size:11px;padding:5px 8px;">
+                            <button @click="field.options.splice(oi,1)" style="color:#EF4444;cursor:pointer;border:none;background:none;font-size:12px;">✕</button>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+
+                    <!-- Conditional Logic -->
+                    <div style="margin-top:12px;padding:12px;border-radius:10px;background:rgba(168,85,247,.04);border:1px solid rgba(168,85,247,.15);">
+                      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+                        <span style="font-size:11px;font-weight:700;color:#A855F7;">⚡ {{ lang == 'ar' and 'المنطق الشرطي' or 'Conditional Logic' }}</span>
+                        <button @click="if(!field.conditions) field.conditions=[]; field.conditions.push({field:'',op:'equals',val:''})"
+                                style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:5px;cursor:pointer;border:1px solid rgba(168,85,247,.3);background:rgba(168,85,247,.06);color:#A855F7;">+</button>
+                      </div>
+                      <p style="font-size:10px;color:var(--text-faint);margin:0 0 6px 0;">{{ lang == 'ar' and 'يظهر هذا الحقل فقط عند تحقق الشرط' or 'Show this field only when condition is met' }}</p>
+                      <template x-for="(c, ci) in (field.conditions || [])" :key="ci">
+                        <div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;flex-wrap:wrap;">
+                          <select x-model="c.field" class="form-input" style="flex:1;min-width:90px;font-size:10px;padding:4px 6px;">
+                            <option value="">{{ lang == 'ar' and '-- حقل --' or '-- Field --' }}</option>
+                            <template x-for="f2 in fields.filter(ff => ff.id !== field.id)" :key="f2.id">
+                              <option :value="f2.key" x-text="f2.label_ar || f2.key"></option>
+                            </template>
+                          </select>
+                          <select x-model="c.op" class="form-input" style="width:80px;font-size:10px;padding:4px 4px;">
+                            <option value="equals">＝</option>
+                            <option value="not_equals">≠</option>
+                            <option value="contains">{{ lang == 'ar' and 'يحتوي' or 'Contains' }}</option>
+                            <option value="not_empty">{{ lang == 'ar' and 'ليس فارغ' or 'Not empty' }}</option>
+                          </select>
+                          <input x-show="c.op!=='not_empty'" type="text" x-model="c.val" class="form-input" style="flex:1;min-width:60px;font-size:10px;padding:4px 6px;" placeholder="{{ lang == 'ar' and 'القيمة' or 'Value' }}">
+                          <button @click="field.conditions.splice(ci,1)" style="color:#EF4444;cursor:pointer;border:none;background:none;font-size:11px;">✕</button>
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+
+        <!-- ── Add Section / Add Field buttons ── -->
+        <div style="display:flex;gap:10px;justify-content:center;padding:16px 0;">
+          <button @click="addSection()" class="btn-secondary" style="font-size:12px;padding:8px 18px;">
+            + {{ lang == 'ar' and 'قسم جديد' or 'New Section' }}
+          </button>
+          <button @click="addField()" class="btn-primary" style="font-size:12px;padding:8px 18px;">
+            + {{ lang == 'ar' and 'حقل جديد' or 'New Field' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- ── Preview Mode ── -->
+      <div x-show="previewMode" style="max-width:640px;margin:0 auto;">
+        <div class="card" style="padding:24px;">
+          <template x-for="sec in sections" :key="sec.id">
+            <div style="margin-bottom:20px;">
+              <h4 style="font-size:14px;font-weight:700;color:var(--text-ink);margin:0 0 12px 0;padding-bottom:8px;border-bottom:2px solid #00AEEF;"
+                  x-text="sec.title_ar"></h4>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <template x-for="field in fields.filter(f => f.section === sec.id)" :key="field.id">
+                  <div :style="field.half_width ? '' : 'grid-column:1/-1'">
+                    <template x-if="field.type==='heading'"><h3 style="font-size:14px;font-weight:700;color:var(--text-ink);margin:8px 0;" x-text="field.label_ar"></h3></template>
+                    <template x-if="field.type==='divider'"><hr style="border:none;border-top:1px solid var(--border-color);margin:10px 0;"></template>
+                    <template x-if="!['heading','divider'].includes(field.type)">
+                      <div>
+                        <label style="font-size:12px;font-weight:600;color:var(--text-ink);display:block;margin-bottom:4px;">
+                          <span x-text="field.label_ar"></span><span x-show="field.required" style="color:#EF4444;margin-inline-start:3px;">*</span>
+                        </label>
+                        <template x-if="field.type==='textarea'"><textarea rows="3" disabled :placeholder="field.placeholder_ar||''" class="form-input resize-none"></textarea></template>
+                        <template x-if="['select','multi_select'].includes(field.type)">
+                          <select disabled class="form-input"><option>{{ lang == 'ar' and '-- اختر --' or '-- Select --' }}</option>
+                            <template x-for="o in (field.options||[])" :key="o.value"><option x-text="o.label_ar||o.label_en"></option></template>
+                          </select>
+                        </template>
+                        <template x-if="field.type==='radio'"><div style="display:flex;flex-direction:column;gap:6px;">
+                          <template x-for="o in (field.options||[])" :key="o.value"><label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-ink);"><input type="radio" disabled style="accent-color:#00AEEF;"><span x-text="o.label_ar||o.label_en"></span></label></template>
+                        </div></template>
+                        <template x-if="field.type==='checkbox'"><div style="display:flex;flex-direction:column;gap:6px;">
+                          <template x-for="o in (field.options||[])" :key="o.value"><label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-ink);"><input type="checkbox" disabled style="accent-color:#00AEEF;"><span x-text="o.label_ar||o.label_en"></span></label></template>
+                        </div></template>
+                        <template x-if="field.type==='file'"><div style="padding:20px;border-radius:10px;border:2px dashed var(--border-color);text-align:center;font-size:11px;color:var(--text-faint);">{{ lang == 'ar' and '📎 اختر ملف' or '📎 Choose file' }}</div></template>
+                        <template x-if="!['textarea','select','multi_select','radio','checkbox','file'].includes(field.type)">
+                          <input :type="field.type==='number'?'number':(field.type==='date'?'date':(field.type==='time'?'time':(field.type==='email'?'email':(field.type==='tel'?'tel':'text'))))" disabled :placeholder="field.placeholder_ar||''" class="form-input">
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- ── Version History (collapsed) ── -->
+      <details style="margin-top:14px;">
+        <summary class="card" style="padding:10px 16px;cursor:pointer;font-size:12px;font-weight:700;color:var(--text-ink);list-style:none;display:flex;align-items:center;gap:6px;">
+          <span>▸</span> {{ lang == 'ar' and 'سجل الإصدارات' or 'Version History' }}
+          <span style="font-size:10px;color:var(--text-faint);margin-inline-start:auto;" x-text="versions.length + ' {{ lang == 'ar' and 'إصدار' or 'versions' }}'"></span>
+        </summary>
+        <div style="padding:8px 0;display:flex;flex-direction:column;gap:4px;">
+          <template x-for="v in versions" :key="v.id">
+            <div class="card" style="padding:8px 14px;display:flex;align-items:center;justify-content:space-between;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font-size:12px;font-weight:700;color:var(--text-ink);" x-text="'v'+v.version"></span>
+                <span x-show="v.is_active" style="font-size:9px;padding:2px 8px;border-radius:20px;background:#10B981;color:#fff;font-weight:700;">{{ lang == 'ar' and 'مفعّل' or 'Active' }}</span>
+                <span style="font-size:10px;color:var(--text-faint);" x-text="v.fields_count+' {{ lang == 'ar' and 'حقل' or 'fields' }}'"></span>
+              </div>
+              <button x-show="!v.is_active" @click="activateVersion(v.id)" class="btn-secondary" style="font-size:10px;padding:4px 12px;">{{ lang == 'ar' and 'تفعيل' or 'Activate' }}</button>
+            </div>
+          </template>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <script>
+  function formBuilder() {
+    var _ft = {text:'{{ lang == "ar" and "نص قصير" or "Short Text" }}',textarea:'{{ lang == "ar" and "نص طويل" or "Long Text" }}',number:'{{ lang == "ar" and "رقم" or "Number" }}',tel:'{{ lang == "ar" and "هاتف" or "Phone" }}',email:'{{ lang == "ar" and "بريد" or "Email" }}',select:'{{ lang == "ar" and "قائمة منسدلة" or "Dropdown" }}',multi_select:'{{ lang == "ar" and "اختيار متعدد" or "Multi Select" }}',checkbox:'{{ lang == "ar" and "خانة اختيار" or "Checkbox" }}',radio:'{{ lang == "ar" and "اختيار واحد" or "Radio" }}',date:'{{ lang == "ar" and "تاريخ" or "Date" }}',time:'{{ lang == "ar" and "وقت" or "Time" }}',file:'{{ lang == "ar" and "ملف" or "File" }}',heading:'{{ lang == "ar" and "عنوان" or "Heading" }}',divider:'{{ lang == "ar" and "فاصل" or "Divider" }}'};
+    return {
+      sections:[], fields:[], sel:null, ver:0, versions:[], pub:false, previewMode:false, focusedSec:-1, _n:100,
+
+      init() {
+        var s = window._activeFormSchema || {};
+        this.sections = s.sections || [];
+        this.fields = s.fields || [];
+        if (!this.sections.length) this.sections = [
+          {id:'sec_info',title_ar:'{{ lang == "ar" and "بيانات مقدم الطلب" or "Submitter Info" }}',title_en:'Submitter Info'},
+          {id:'sec_details',title_ar:'{{ lang == "ar" and "تفاصيل التذكرة" or "Ticket Details" }}',title_en:'Ticket Details'},
+        ];
+        if (!this.fields.length) this.fields = [
+          {id:'f1',key:'submitter_name',type:'text',label_ar:'الاسم الكامل',label_en:'Full Name',placeholder_ar:'أدخل الاسم',placeholder_en:'Enter name',required:true,section:'sec_info',system:true},
+          {id:'f2',key:'submitter_phone',type:'tel',label_ar:'رقم الجوال',label_en:'Phone',placeholder_ar:'05XXXXXXXX',placeholder_en:'05XXXXXXXX',required:true,section:'sec_info',system:true},
+          {id:'f3',key:'submitter_email',type:'email',label_ar:'البريد الإلكتروني',label_en:'Email',placeholder_ar:'name@mobily.com.sa',required:false,section:'sec_info',system:true},
+          {id:'f4',key:'employee_id',type:'text',label_ar:'الرقم الوظيفي',label_en:'Employee ID',placeholder_ar:'EMP-XXXX',required:false,section:'sec_info',system:true},
+          {id:'f5',key:'_sys_branch',type:'select',label_ar:'الفرع',label_en:'Branch',required:true,section:'sec_details',system:true},
+          {id:'f6',key:'_sys_category',type:'select',label_ar:'الفئة',label_en:'Category',required:true,section:'sec_details',system:true},
+          {id:'f7',key:'subject',type:'text',label_ar:'الموضوع',label_en:'Subject',placeholder_ar:'عنوان مختصر',required:false,section:'sec_details',system:true},
+          {id:'f8',key:'description',type:'textarea',label_ar:'وصف المشكلة',label_en:'Description',placeholder_ar:'اشرح المشكلة بالتفصيل...',required:true,section:'sec_details',system:true,min_length:50},
+        ];
+        var me = this;
+        this.$nextTick(function(){ me.initSort(); me.loadVersions(); });
+      },
+
+      addSection() {
+        var id = 'sec_'+(++this._n);
+        this.sections.push({id:id, title_ar:'{{ lang == "ar" and "قسم جديد" or "New Section" }}', title_en:'New Section'});
+      },
+      removeSection(i) {
+        var sid = this.sections[i].id;
+        this.fields = this.fields.filter(function(f){return f.section!==sid;});
+        this.sections.splice(i,1);
+      },
+      addField(type) {
+        type = type || 'text';
+        var sid = this.sections.length ? this.sections[this.sections.length-1].id : '_default';
+        var id = 'f_'+(++this._n);
+        var f = {id:id, key:type+'_'+this._n, type:type, label_ar:_ft[type]||'', label_en:'', placeholder_ar:'', placeholder_en:'', required:false, half_width:false, section:sid, conditions:[]};
+        if (['select','multi_select','radio','checkbox'].indexOf(type) >= 0) {
+          f.options = [{value:'o1',label_ar:'{{ lang == "ar" and "الخيار 1" or "Option 1" }}',label_en:'Option 1'},{value:'o2',label_ar:'{{ lang == "ar" and "الخيار 2" or "Option 2" }}',label_en:'Option 2'}];
+        }
+        this.fields.push(f);
+        this.sel = id;
+      },
+      removeField(id) { this.fields = this.fields.filter(function(f){return f.id!==id;}); if(this.sel===id) this.sel=null; },
+      duplicateField(f) {
+        var d = JSON.parse(JSON.stringify(f));
+        d.id = 'f_'+(++this._n); d.key = f.key+'_copy'; d.system = false;
+        this.fields.splice(this.fields.indexOf(f)+1, 0, d);
+      },
+
+      initSort() {
+        var me = this;
+        this.sections.forEach(function(sec){
+          var el = document.getElementById('sec-fields-'+sec.id);
+          if (el && typeof Sortable !== 'undefined') {
+            Sortable.create(el, {animation:150, handle:'.fd', group:'fields', onEnd:function(e){
+              var secFields = me.fields.filter(function(f){return f.section===sec.id;});
+              var moved = secFields[e.oldIndex];
+              if(!moved) return;
+              me.fields.splice(me.fields.indexOf(moved),1);
+              var target = secFields[e.newIndex];
+              var ni = target ? me.fields.indexOf(target) : me.fields.length;
+              me.fields.splice(ni,0,moved);
+            }});
+          }
+        });
+      },
+
+      async publishForm() {
+        this.pub = true;
+        var msg = document.getElementById('fb-msg');
+        try {
+          var r = await fetch('/api/manager/form-version',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sections:this.sections,fields:this.fields,settings:{}})});
+          var d = await r.json();
+          msg.style.color = d.ok ? '#10B981' : '#EF4444';
+          msg.textContent = d.message || (d.ok ? 'OK' : 'Error');
+          if(d.ok) { this.ver = d.version||this.ver+1; this.loadVersions(); }
+        } catch(e) { msg.style.color='#EF4444'; msg.textContent='Network error'; }
+        this.pub = false;
+        setTimeout(function(){msg.textContent='';},5000);
+      },
+
+      async loadVersions() {
+        try {
+          var r = await fetch('/api/manager/form-versions');
+          var d = await r.json();
+          this.versions = d.versions||[];
+          var a = this.versions.find(function(v){return v.is_active;});
+          if(a) this.ver = a.version;
+        } catch(e){}
+      },
+
+      async activateVersion(vid) {
+        var msg = document.getElementById('fb-msg');
+        try {
+          var r = await fetch('/api/manager/form-versions/'+vid+'/activate',{method:'POST'});
+          var d = await r.json();
+          if(d.ok) { msg.style.color='#10B981'; msg.textContent=d.message; this.loadVersions();
+            var sr = await fetch('/api/manager/form-schema'); var sc = await sr.json();
+            this.sections=sc.sections||[]; this.fields=sc.fields||[]; this.ver=sc.version||0;
+          }
+        } catch(e){}
+        setTimeout(function(){msg.textContent='';},4000);
+      }
+    };
+  }
+  </script>
+
+  <!-- ══ TAB: SLA CONFIG ══════════════════════════════════════════════════ -->
+  <div x-show="activeTab === 'sla'" x-transition>
+    <div class="card overflow-hidden">
+      <div class="px-5 py-4" style="border-bottom: 1px solid var(--border-color);">
+        <h3 class="text-sm font-semibold" style="color: var(--text-ink);">{{ t('mgr.tab_sla', lang=lang) }}</h3>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>{{ lang == 'ar' and 'الاسم' or 'Name' }}</th>
+            <th>{{ lang == 'ar' and 'الأولوية' or 'Priority' }}</th>
+            <th>{{ lang == 'ar' and 'وقت الاستجابة (دقيقة)' or 'Response (min)' }}</th>
+            <th>{{ lang == 'ar' and 'وقت الحل (دقيقة)' or 'Resolution (min)' }}</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for policy in sla_policies %}
+          <tr x-data="{ editing: false }">
+            <td>
+              <span x-show="!editing">{{ policy.name_ar if lang == 'ar' else (policy.name_en or policy.name_ar) }}</span>
+              <input x-show="editing" type="text" value="{{ policy.name_ar if lang == 'ar' else (policy.name_en or policy.name_ar) }}" class="form-input text-sm py-1">
+            </td>
+            <td><span class="badge-{{ policy.priority }} rounded-full px-2 py-0.5 text-xs font-semibold">{{ t('ticket.priority.' ~ policy.priority, lang=lang) }}</span></td>
+            <td class="text-sm">
+              <span x-show="!editing">{{ policy.response_minutes }}</span>
+              <input x-show="editing" type="number" value="{{ policy.response_minutes }}" name="response_minutes" class="form-input text-sm py-1 w-20">
+            </td>
+            <td class="text-sm">
+              <span x-show="!editing">{{ policy.resolution_minutes }}</span>
+              <input x-show="editing" type="number" value="{{ policy.resolution_minutes }}" name="resolution_minutes" class="form-input text-sm py-1 w-24">
+            </td>
+            <td>
+              <div class="flex gap-1">
+                <button @click="editing = !editing" class="text-xs text-blue-500 hover:text-blue-700">
+                  <span x-text="editing ? '{{ t('app.cancel', lang=lang) }}' : '✏️'"></span>
+                </button>
+                <form x-show="editing" hx-post="/api/manager/sla-policy" hx-target="closest tr" hx-swap="outerHTML">
+                  <input type="hidden" name="policy_id" value="{{ policy.id }}">
+                  <input type="hidden" name="name_ar" value="{{ policy.name_ar }}">
+                  <input type="hidden" name="priority" value="{{ policy.priority }}">
+                  <button type="submit" class="text-xs text-green-600 hover:text-green-800">💾</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-center py-8 text-sm" style="color: var(--text-faint);">—</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ══ TAB: AUTOMATION ══════════════════════════════════════════════════ -->
+  <div x-show="activeTab === 'automation'" x-transition>
+    <div class="card overflow-hidden">
+      <div class="flex items-center justify-between px-5 py-4" style="border-bottom: 1px solid var(--border-color);">
+        <h3 class="text-sm font-semibold" style="color: var(--text-ink);">{{ t('mgr.tab_automation', lang=lang) }}</h3>
+        <button @click="automationModal = true" class="btn-primary text-xs py-1.5">+ {{ lang == 'ar' and 'قاعدة جديدة' or 'New Rule' }}</button>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>{{ lang == 'ar' and 'الاسم' or 'Name' }}</th>
+            <th>{{ t('mgr.automation_trigger', lang=lang) }}</th>
+            <th>{{ t('mgr.automation_active', lang=lang) }}</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for rule in automation_rules %}
+          <tr>
+            <td class="text-sm font-medium" style="color: var(--text-ink);">{{ rule.name_ar }}</td>
+            <td class="text-xs font-mono" style="color: var(--text-muted);">{{ rule.trigger }}</td>
+            <td>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" {% if rule.is_active %}checked{% endif %}
+                       hx-post="/api/manager/automation"
+                       hx-vals='{"rule_id":"{{ rule.id }}", "name_ar":"{{ rule.name_ar }}", "trigger":"{{ rule.trigger }}", "is_active":"{% if rule.is_active %}0{% else %}1{% endif %}"}'
+                       class="sr-only peer">
+                <div class="w-9 h-5 bg-gray-200 peer-focus:ring-2 peer-focus:ring-primary rounded-full peer dark:bg-gray-700 peer-checked:bg-primary after:content-[''] after:absolute after:top-0.5 after:start-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all"></div>
+              </label>
+            </td>
+            <td>
+              <button hx-delete="/api/manager/automation/{{ rule.id }}" hx-target="closest tr" hx-swap="outerHTML"
+                      hx-confirm="{{ t('app.confirm', lang=lang) }}?"
+                      class="text-xs text-red-500 hover:text-red-700">🗑</button>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="text-center py-8 text-sm" style="color: var(--text-faint);">—</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Automation Rule Builder Modal -->
+    <div x-show="automationModal" x-transition class="modal-overlay">
+      <div class="modal-box max-w-2xl">
+        <h3 class="text-base font-bold mb-4" style="color: var(--text-ink);">{{ lang == 'ar' and 'قاعدة جديدة' or 'New Automation Rule' }}</h3>
+        <form hx-post="/api/manager/automation" hx-target="body" hx-swap="none"
+              @htmx:after-request="if(event.detail.successful) { automationModal = false; location.reload(); }">
+          <div class="space-y-4">
+            <div>
+              <label class="form-label">{{ lang == 'ar' and 'اسم القاعدة' or 'Rule Name' }}</label>
+              <input type="text" name="name_ar" class="form-input" required>
+            </div>
+            <div>
+              <label class="form-label">{{ t('mgr.automation_trigger', lang=lang) }}</label>
+              <select name="trigger" class="form-input">
+                {% for trig in ['ticket_created','ticket_status_changed','sla_warning','sla_breach','reply_received','ticket_idle_24h'] %}
+                <option value="{{ trig }}">{{ trig }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <!-- Visual IF/THEN builder -->
+            <div class="rounded-xl bg-blue-50 dark:bg-blue-900/20 p-4">
+              <p class="text-xs font-semibold text-blue-700 dark:text-blue-400 mb-2">{{ t('mgr.automation_if', lang=lang) }}</p>
+              <div class="space-y-2" x-data="{ conds: [{ field: 'priority', op: 'equals', value: 'high' }] }">
+                <template x-for="(c, i) in conds" :key="i">
+                  <div class="flex gap-2 items-center">
+                    <select x-model="c.field" class="form-input text-xs py-1.5 flex-1">
+                      <option value="priority">{{ t('ticket.priority.label', lang=lang) }}</option>
+                      <option value="channel">{{ t('ticket.channel', lang=lang) }}</option>
+                      <option value="category">{{ t('portal.category', lang=lang) }}</option>
+                    </select>
+                    <select x-model="c.op" class="form-input text-xs py-1.5 w-28">
+                      <option value="equals">= equals</option>
+                      <option value="not_equals">≠ not</option>
+                    </select>
+                    <input type="text" x-model="c.value" class="form-input text-xs py-1.5 flex-1">
+                    <button type="button" @click="conds.splice(i,1)" class="text-red-400 hover:text-red-600">✕</button>
+                  </div>
+                </template>
+                <button type="button" @click="conds.push({ field: 'priority', op: 'equals', value: '' })"
+                        class="text-xs text-blue-600 hover:text-blue-800">+ {{ t('mgr.automation_and', lang=lang) }}</button>
+                <input type="hidden" name="conditions_json" :value="JSON.stringify(conds)">
+              </div>
+            </div>
+            <div class="rounded-xl bg-green-50 dark:bg-green-900/20 p-4">
+              <p class="text-xs font-semibold text-green-700 dark:text-green-400 mb-2">{{ t('mgr.automation_then', lang=lang) }}</p>
+              <div x-data="{ acts: [{ type: 'set_priority', value: 'high' }] }">
+                <template x-for="(a, i) in acts" :key="i">
+                  <div class="flex gap-2 items-center mb-2">
+                    <select x-model="a.type" class="form-input text-xs py-1.5 flex-1">
+                      <option value="set_priority">{{ t('mgr.automation_action', lang=lang) }}: Set Priority</option>
+                      <option value="assign_to">Assign To</option>
+                      <option value="send_email">Send Email</option>
+                      <option value="add_tag">Add Tag</option>
+                    </select>
+                    <input type="text" x-model="a.value" class="form-input text-xs py-1.5 flex-1" placeholder="value">
+                    <button type="button" @click="acts.splice(i,1)" class="text-red-400 hover:text-red-600">✕</button>
+                  </div>
+                </template>
+                <button type="button" @click="acts.push({ type: 'send_email', value: '' })"
+                        class="text-xs text-green-600 hover:text-green-800">+ {{ t('mgr.automation_action', lang=lang) }}</button>
+                <input type="hidden" name="actions_json" :value="JSON.stringify(acts)">
+              </div>
+            </div>
+          </div>
+          <div class="flex gap-3 mt-5">
+            <button type="submit" class="btn-primary flex-1 justify-center">{{ t('app.save', lang=lang) }}</button>
+            <button type="button" @click="automationModal = false" class="btn-secondary">{{ t('app.cancel', lang=lang) }}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ TAB: GAMIFICATION ════════════════════════════════════════════════ -->
+  <div x-show="activeTab === 'gamification'" x-transition>
+    <div class="card p-6">
+      <p class="text-sm" style="color: var(--text-muted);">{{ lang == 'ar' and 'إعدادات الشارات والمكافآت والتحدّيات.' or 'Configure badges, rewards, and challenges.' }}</p>
+      <div class="mt-4 grid grid-cols-2 gap-4">
+        {% for name, icon in [('Top Resolver','🏆'), ('SLA Hero','⚡'), ('CSAT Star','⭐'), ('Speed Demon','🚀')] %}
+        <div class="rounded-xl p-4 flex items-center gap-3" style="border: 1px solid var(--border-color);">
+          <span class="text-2xl">{{ icon }}</span>
+          <div>
+            <p class="text-sm font-medium" style="color: var(--text-ink);">{{ name }}</p>
+            <label class="flex items-center gap-1.5 mt-1 text-xs cursor-pointer" style="color: var(--text-muted);">
+              <input type="checkbox" checked class="h-3.5 w-3.5 rounded text-primary"> {{ lang == 'ar' and 'مفعّلة' or 'Enabled' }}
+            </label>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ TAB: AUDIT LOG ══════════════════════════════════════════════════ -->
+  <div x-show="activeTab === 'audit'" x-transition>
+    <div class="card overflow-hidden">
+      <div class="px-5 py-4" style="border-bottom: 1px solid var(--border-color);">
+        <h3 class="text-sm font-semibold" style="color: var(--text-ink);">{{ t('mgr.tab_audit', lang=lang) }}</h3>
+      </div>
+      <div class="overflow-x-auto max-h-[60vh] overflow-y-auto">
+        <table class="data-table">
+          <thead class="sticky top-0">
+            <tr>
+              <th>{{ lang == 'ar' and 'الجدول' or 'Table' }}</th>
+              <th>{{ lang == 'ar' and 'الإجراء' or 'Action' }}</th>
+              <th>{{ lang == 'ar' and 'المستخدم' or 'User' }}</th>
+              <th>{{ lang == 'ar' and 'التاريخ' or 'Date' }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for log in audit_logs %}
+            <tr>
+              <td class="font-mono text-xs">{{ log.table_name }}</td>
+              <td>
+                <span class="rounded-full px-2 py-0.5 text-[10px] font-semibold
+                  {% if log.action == 'create' %}bg-green-100 text-green-700
+                  {% elif log.action == 'update' %}bg-blue-100 text-blue-700
+                  {% else %}bg-red-100 text-red-700{% endif %}">
+                  {{ log.action }}
+                </span>
+              </td>
+              <td class="text-xs" style="color: var(--text-muted);">{{ log.changed_by or '—' }}</td>
+              <td class="text-xs" style="color: var(--text-muted);">{{ format_date(log.created_at, lang) }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="text-center py-8 text-sm" style="color: var(--text-faint);">—</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ TAB: SCHEDULED REPORTS ══════════════════════════════════════════ -->
+  <div x-show="activeTab === 'reports'" x-transition>
+    <div class="card p-5">
+      <h3 class="text-sm font-semibold mb-4" style="color: var(--text-ink);">{{ t('mgr.tab_reports', lang=lang) }}</h3>
+      <form hx-post="/api/manager/scheduled-report" hx-target="#report-result" class="space-y-4">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="form-label">{{ t('mgr.report_schedule', lang=lang) }}</label>
+            <select name="report_type" class="form-input">
+              <option value="kpi_summary">{{ lang == 'ar' and 'ملخص الأداء' or 'KPI Summary' }}</option>
+              <option value="ticket_stats">{{ lang == 'ar' and 'إحصائيات التذاكر' or 'Ticket Stats' }}</option>
+              <option value="sla_report">{{ lang == 'ar' and 'تقرير SLA' or 'SLA Report' }}</option>
+              <option value="agent_performance">{{ lang == 'ar' and 'أداء الموظفين' or 'Agent Performance' }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="form-label">{{ lang == 'ar' and 'التكرار' or 'Frequency' }}</label>
+            <select name="frequency" class="form-input">
+              <option value="daily">{{ lang == 'ar' and 'يومياً' or 'Daily' }}</option>
+              <option value="weekly" selected>{{ lang == 'ar' and 'أسبوعياً' or 'Weekly' }}</option>
+              <option value="monthly">{{ lang == 'ar' and 'شهرياً' or 'Monthly' }}</option>
+            </select>
+          </div>
+          <div class="col-span-2">
+            <label class="form-label">{{ t('mgr.report_recipients', lang=lang) }}</label>
+            <input type="text" name="recipients" class="form-input"
+                   placeholder="email@example.com, other@domain.com"
+                   required>
+            <p class="text-xs mt-1" style="color:var(--text-faint);">{{ lang == 'ar' and 'أي بريد إلكتروني صالح — داخلي أو خارجي' or 'Any valid email — internal or external' }}</p>
+          </div>
+        </div>
+        <button type="submit" class="btn-primary">{{ t('app.save', lang=lang) }}</button>
+      </form>
+      <div id="report-result" class="mt-3"></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════ NOTIFICATIONS TAB ══════════════════════════════════ -->
+  <div x-show="activeTab === 'notifications'" x-cloak>
+    <div class="card p-6">
+      <h3 class="text-base font-bold mb-1" style="color:var(--text-ink);">
+        {{ lang == 'ar' and 'إعدادات الإشعارات' or 'Notification Settings' }}
+      </h3>
+      <p class="text-xs mb-6" style="color:var(--text-muted);">
+        {{ lang == 'ar' and 'تحكم في أحداث الإشعارات والصوت لكل نوع من الأحداث' or 'Control notification events and sounds for each event type' }}
+      </p>
+
+      <!-- Global sound toggle -->
+      <div class="flex items-center justify-between p-4 rounded-xl mb-6"
+           style="background:rgba(0,174,239,0.06);border:1px solid rgba(0,174,239,0.2);">
+        <div>
+          <p class="text-sm font-bold" style="color:var(--text-ink);">
+            🔔 {{ lang == 'ar' and 'تفعيل الأصوات' or 'Enable sounds' }}
+          </p>
+          <p class="text-xs mt-0.5" style="color:var(--text-muted);">
+            {{ lang == 'ar' and 'تشغيل نغمة صوتية عند وصول الإشعارات' or 'Play a tone when notifications arrive' }}
+          </p>
+        </div>
+        <button type="button"
+                x-data="{ on: localStorage.getItem('notif_sound') !== '0' }"
+                @click="on = !on; localStorage.setItem('notif_sound', on ? '1' : '0'); if(on) window.playNotifSound('chime')"
+                :style="on ? 'background:#00AEEF' : 'background:var(--bg-muted)'"
+                style="position:relative;width:44px;height:24px;border-radius:99px;border:none;cursor:pointer;transition:background 0.2s;flex-shrink:0;">
+          <span :style="on ? 'transform:translateX(20px)' : 'transform:translateX(2px)'"
+                style="position:absolute;top:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.3);"></span>
+        </button>
+      </div>
+
+      <!-- Rules table -->
+      {% if notif_rules %}
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr style="border-bottom:2px solid var(--border-color);">
+              <th style="text-align:start;padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em;">
+                {{ lang == 'ar' and 'نوع الحدث' or 'Event' }}
+              </th>
+              <th style="text-align:center;padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em;">
+                {{ lang == 'ar' and 'الأدوار المستهدفة' or 'Target Roles' }}
+              </th>
+              <th style="text-align:center;padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em;">
+                {{ lang == 'ar' and 'صوت' or 'Sound' }}
+              </th>
+              <th style="text-align:center;padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em;">
+                {{ lang == 'ar' and 'نوع الصوت' or 'Sound Type' }}
+              </th>
+              <th style="text-align:center;padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em;">
+                {{ lang == 'ar' and 'مفعّل' or 'Active' }}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for rule in notif_rules %}
+            <tr style="border-bottom:1px solid var(--border-color);" x-data="{ saving: false, ok: false }">
+              <td style="padding:12px 12px;">
+                <p class="text-sm font-semibold" style="color:var(--text-ink);">
+                  {{ rule.name_ar if lang == 'ar' and rule.name_ar else rule.name_en or rule.event_type }}
+                </p>
+                <p class="text-xs" style="color:var(--text-faint);">{{ rule.event_type }}</p>
+              </td>
+              <td style="padding:12px;text-align:center;">
+                <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:center;">
+                  {% for role in (rule.target_roles or []) %}
+                  <span style="padding:2px 8px;border-radius:99px;font-size:10px;font-weight:600;
+                    background:{% if role == 'employee' %}rgba(0,174,239,0.1){% elif role == 'supervisor' %}rgba(124,58,237,0.1){% else %}rgba(245,158,11,0.1){% endif %};
+                    color:{% if role == 'employee' %}#00AEEF{% elif role == 'supervisor' %}#7C3AED{% else %}#D97706{% endif %};">
+                    {% if role == 'employee' %}{{ lang == 'ar' and 'موظف' or 'Employee' }}
+                    {% elif role == 'supervisor' %}{{ lang == 'ar' and 'مشرف' or 'Supervisor' }}
+                    {% else %}{{ lang == 'ar' and 'مدير' or 'Manager' }}{% endif %}
+                  </span>
+                  {% endfor %}
+                </div>
+              </td>
+              <td style="padding:12px;text-align:center;">
+                <button type="button"
+                        @click="saving=true; fetch('/api/manager/notif-rules/{{ rule.id }}/toggle-sound', {method:'POST'}).then(r=>r.json()).then(d=>{ saving=false; ok=true; setTimeout(()=>ok=false,2000); if(d.sound_enabled) window.playNotifSound('{{ rule.sound_file or 'default' }}') })"
+                        :style="'background:' + (saving ? 'var(--bg-muted)' : '{{ 'rgba(0,174,239,0.1)' if rule.sound_enabled else 'var(--bg-muted)' }}')"
+                        x-data="{ enabled: {{ 'true' if rule.sound_enabled else 'false' }} }"
+                        @click.once="enabled = !enabled"
+                        style="padding:4px 12px;border-radius:6px;border:none;cursor:pointer;font-size:12px;font-weight:600;transition:all 0.15s;">
+                  <span x-text="enabled ? '🔊' : '🔇'">{{ '🔊' if rule.sound_enabled else '🔇' }}</span>
+                </button>
+              </td>
+              <td style="padding:12px;text-align:center;">
+                <select onchange="fetch('/api/manager/notif-rules/{{ rule.id }}/sound-file?sf='+this.value, {method:'POST'})"
+                        style="padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:var(--input-bg);color:var(--text-ink);font-size:12px;">
+                  {% for sf in ['default','chime','alert','urgent','warning','success','mention'] %}
+                  <option value="{{ sf }}" {{ 'selected' if (rule.sound_file or 'default') == sf else '' }}>
+                    {{ {'default':'عادي','chime':'رنين','alert':'تنبيه','urgent':'عاجل','warning':'تحذير','success':'نجاح','mention':'ذكر'}.get(sf, sf) if lang == 'ar' else sf.title() }}
+                  </option>
+                  {% endfor %}
+                </select>
+                <button type="button"
+                        onclick="window.playNotifSound(this.previousElementSibling.value)"
+                        style="margin-inline-start:6px;padding:4px 8px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-muted);cursor:pointer;font-size:11px;color:var(--text-muted);">
+                  ▶ {{ lang == 'ar' and 'تجربة' or 'Test' }}
+                </button>
+              </td>
+              <td style="padding:12px;text-align:center;">
+                <button type="button"
+                        x-data="{ active: {{ 'true' if rule.is_active else 'false' }} }"
+                        @click="active = !active; fetch('/api/manager/notif-rules/{{ rule.id }}/toggle', {method:'POST'})"
+                        :style="active ? 'background:rgba(16,185,129,0.12);color:#10B981;border-color:rgba(16,185,129,0.3)' : 'background:rgba(239,68,68,0.08);color:#EF4444;border-color:rgba(239,68,68,0.2)'"
+                        style="padding:4px 14px;border-radius:6px;border:1.5px solid;cursor:pointer;font-size:12px;font-weight:700;transition:all 0.15s;">
+                  <span x-text="active ? '{{ lang == 'ar' and 'مفعّل' or 'ON' }}' : '{{ lang == 'ar' and 'معطّل' or 'OFF' }}'">
+                    {{ 'مفعّل' if lang == 'ar' and rule.is_active else ('ON' if rule.is_active else ('معطّل' if lang == 'ar' else 'OFF')) }}
+                  </span>
+                </button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-sm text-center py-8" style="color:var(--text-faint);">
+        {{ lang == 'ar' and 'لا توجد قواعد إشعارات — تأكد من تشغيل التهجير 005' or 'No notification rules — run migration 005' }}
+      </p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ══ TAB: CALL REASONS ═════════════════════════════════════════════════ -->
+  <div x-show="activeTab === 'call_reasons'" x-cloak
+       x-data="{
+         fields: [],
+         editingField: null,
+         newOptAr: '', newOptEn: '',
+         saving: false, saved: false,
+         async init() {
+           const r = await fetch('/api/call-reason-config');
+           const d = await r.json();
+           this.fields = d.fields || [];
+         },
+         addField(type) {
+           const id = 'f' + Date.now();
+           this.fields.push({ id, type, label_ar: '', label_en: '', required: false, options_ar: [], options_en: [] });
+           this.editingField = id;
+         },
+         removeField(id) { this.fields = this.fields.filter(f => f.id !== id); if(this.editingField === id) this.editingField = null; },
+         moveUp(i)   { if(i > 0) { const tmp = this.fields[i]; this.fields[i] = this.fields[i-1]; this.fields[i-1] = tmp; this.fields = [...this.fields]; } },
+         moveDown(i) { if(i < this.fields.length-1) { const tmp = this.fields[i]; this.fields[i] = this.fields[i+1]; this.fields[i+1] = tmp; this.fields = [...this.fields]; } },
+         addOption(field) {
+           if(!this.newOptAr.trim()) return;
+           field.options_ar.push(this.newOptAr.trim());
+           field.options_en.push(this.newOptEn.trim() || this.newOptAr.trim());
+           this.newOptAr = ''; this.newOptEn = '';
+         },
+         removeOption(field, i) { field.options_ar.splice(i,1); field.options_en.splice(i,1); },
+         async save() {
+           this.saving = true;
+           await fetch('/api/call-reason-config', {
+             method: 'POST',
+             headers: {'Content-Type':'application/json'},
+             body: JSON.stringify({ fields: this.fields })
+           });
+           this.saving = false; this.saved = true;
+           setTimeout(() => this.saved = false, 2500);
+         }
+       }" x-init="init()">
+
+    <div style="display:grid;grid-template-columns:300px 1fr;gap:20px;align-items:start;">
+
+      <!-- Left: Fields list + add buttons -->
+      <div class="card p-4" style="position:sticky;top:80px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+          <h3 class="text-sm font-bold" style="color:var(--text-ink);">
+            {{ lang == 'ar' and 'حقول النموذج' or 'Form Fields' }}
+          </h3>
+          <span style="font-size:11px;color:var(--text-faint);" x-text="fields.length + ' {{ lang == 'ar' and 'حقل' or 'fields' }}'"></span>
+        </div>
+
+        <!-- Fields list -->
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px;min-height:60px;">
+          <template x-for="(field, i) in fields" :key="field.id">
+            <div @click="editingField = field.id"
+                 :style="editingField === field.id ? 'border-color:#00AEEF;background:rgba(0,174,239,0.06)' : 'border-color:var(--border-color)'"
+                 style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:1.5px solid;cursor:pointer;transition:all 0.15s;">
+              <!-- Type icon -->
+              <span style="font-size:14px;flex-shrink:0;"
+                    x-text="field.type==='text'?'✏️':field.type==='textarea'?'📝':field.type==='select'?'▼':'☑'"></span>
+              <span style="font-size:12px;font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-ink);"
+                    x-text="field.label_ar || '{{ lang == 'ar' and '(بدون اسم)' or '(untitled)' }}'"></span>
+              <!-- Move up/down -->
+              <div style="display:flex;flex-direction:column;gap:1px;">
+                <button @click.stop="moveUp(i)" type="button"
+                        style="background:none;border:none;cursor:pointer;color:var(--text-faint);font-size:10px;padding:1px 3px;line-height:1;">▲</button>
+                <button @click.stop="moveDown(i)" type="button"
+                        style="background:none;border:none;cursor:pointer;color:var(--text-faint);font-size:10px;padding:1px 3px;line-height:1;">▼</button>
+              </div>
+              <button @click.stop="removeField(field.id)" type="button"
+                      style="color:#EF4444;background:none;border:none;cursor:pointer;font-size:14px;padding:0 2px;">✕</button>
+            </div>
+          </template>
+          <p x-show="fields.length === 0"
+             style="font-size:12px;color:var(--text-faint);text-align:center;padding:16px;">
+            {{ lang == 'ar' and 'لا توجد حقول — أضف حقلاً من الأزرار أدناه' or 'No fields — add one below' }}
+          </p>
+        </div>
+
+        <!-- Add field buttons -->
+        <p class="form-label mb-2">{{ lang == 'ar' and 'إضافة حقل جديد' or 'Add New Field' }}</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+          {% for ftype, icon, label_ar, label_en in [
+            ('text',     '✏️', 'نص قصير',       'Short Text'),
+            ('textarea', '📝', 'نص طويل',        'Long Text'),
+            ('select',   '▼',  'قائمة منسدلة',   'Dropdown'),
+            ('checkbox', '☑',  'اختيار متعدد',   'Multi-select'),
+          ] %}
+          <button @click="addField('{{ ftype }}')" type="button"
+                  style="display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:8px;
+                         border:1.5px dashed var(--border-color);background:none;cursor:pointer;
+                         color:var(--text-muted);font-size:12px;font-weight:600;transition:all 0.15s;"
+                  onmouseover="this.style.borderColor='#00AEEF';this.style.color='#00AEEF'"
+                  onmouseout="this.style.borderColor='var(--border-color)';this.style.color='var(--text-muted)'">
+            <span>{{ icon }}</span>
+            <span>{{ label_ar if lang == 'ar' else label_en }}</span>
+          </button>
+          {% endfor %}
+        </div>
+
+        <!-- Save -->
+        <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border-color);display:flex;align-items:center;gap:10px;">
+          <button @click="save()" type="button" class="btn-cyan" style="flex:1;" :disabled="saving">
+            <span x-show="!saving">{{ lang == 'ar' and 'حفظ' or 'Save' }}</span>
+            <span x-show="saving">...</span>
+          </button>
+          <span x-show="saved" x-transition style="font-size:12px;color:#10B981;font-weight:700;">✓</span>
+        </div>
+      </div>
+
+      <!-- Right: Field editor -->
+      <div class="card p-5">
+        <template x-if="!editingField">
+          <p style="color:var(--text-faint);font-size:13px;text-align:center;padding:40px 0;">
+            {{ lang == 'ar' and 'اختر حقلاً من القائمة لتعديله' or 'Select a field to edit' }}
+          </p>
+        </template>
+        <template x-if="editingField">
+          <template x-for="field in fields.filter(f => f.id === editingField)" :key="field.id">
+            <div style="display:flex;flex-direction:column;gap:16px;">
+
+              <!-- Field type badge -->
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;
+                             background:rgba(0,174,239,0.1);color:#00AEEF;"
+                      x-text="field.type === 'text' ? '{{ lang == 'ar' and 'نص قصير' or 'Short Text' }}' :
+                               field.type === 'textarea' ? '{{ lang == 'ar' and 'نص طويل' or 'Long Text' }}' :
+                               field.type === 'select' ? '{{ lang == 'ar' and 'قائمة منسدلة' or 'Dropdown' }}' :
+                               '{{ lang == 'ar' and 'اختيار متعدد' or 'Multi-select' }}'"></span>
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:700;color:var(--text-muted);">
+                  <input type="checkbox" x-model="field.required" style="accent-color:#EF4444;">
+                  {{ lang == 'ar' and 'حقل مطلوب' or 'Required' }}
+                </label>
+              </div>
+
+              <!-- Labels -->
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div>
+                  <label class="form-label">{{ lang == 'ar' and 'الاسم (عربي)' or 'Label (Arabic)' }}</label>
+                  <input type="text" x-model="field.label_ar" class="form-input text-sm"
+                         placeholder="{{ lang == 'ar' and 'مثال: سبب الاتصال' or 'e.g. Call Reason' }}">
+                </div>
+                <div>
+                  <label class="form-label">{{ lang == 'ar' and 'الاسم (إنجليزي)' or 'Label (English)' }}</label>
+                  <input type="text" x-model="field.label_en" class="form-input text-sm"
+                         placeholder="e.g. Call Reason">
+                </div>
+              </div>
+
+              <!-- Options (for select / checkbox) -->
+              <div x-show="field.type === 'select' || field.type === 'checkbox'" x-transition>
+                <label class="form-label mb-2">{{ lang == 'ar' and 'الخيارات' or 'Options' }}</label>
+
+                <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
+                  <template x-for="(opt, i) in field.options_ar" :key="i">
+                    <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;
+                                background:var(--bg-muted);border:1px solid var(--border-color);">
+                      <span style="font-size:12px;font-weight:700;flex:1;color:var(--text-ink);" x-text="opt"></span>
+                      <span style="font-size:11px;color:var(--text-faint);flex:1;" x-text="field.options_en[i] || ''"></span>
+                      <button @click="removeOption(field, i)" type="button"
+                              style="color:#EF4444;background:none;border:none;cursor:pointer;font-size:14px;">✕</button>
+                    </div>
+                  </template>
+                  <p x-show="field.options_ar.length === 0"
+                     style="font-size:11px;color:var(--text-faint);padding:8px;text-align:center;">
+                    {{ lang == 'ar' and 'لا توجد خيارات — أضف من الأسفل' or 'No options yet' }}
+                  </p>
+                </div>
+
+                <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;">
+                  <div>
+                    <label class="form-label text-[11px]">{{ lang == 'ar' and 'عربي' or 'Arabic' }}</label>
+                    <input type="text" x-model="newOptAr" @keydown.enter.prevent="addOption(field)"
+                           class="form-input text-sm" placeholder="{{ lang == 'ar' and 'الخيار بالعربية' or 'Option in Arabic' }}">
+                  </div>
+                  <div>
+                    <label class="form-label text-[11px]">{{ lang == 'ar' and 'إنجليزي' or 'English' }}</label>
+                    <input type="text" x-model="newOptEn" @keydown.enter.prevent="addOption(field)"
+                           class="form-input text-sm" placeholder="Option in English">
+                  </div>
+                  <button @click="addOption(field)" type="button" class="btn-cyan" style="white-space:nowrap;padding:8px 12px;">
+                    + {{ lang == 'ar' and 'إضافة' or 'Add' }}
+                  </button>
+                </div>
+              </div>
+
+              <!-- Preview -->
+              <div style="padding:14px;border-radius:10px;background:var(--bg-muted);border:1px solid var(--border-color);">
+                <p style="font-size:11px;font-weight:700;color:var(--text-faint);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.06em;">
+                  {{ lang == 'ar' and 'معاينة' or 'Preview' }}
+                </p>
+                <label class="form-label" x-text="field.label_ar || '...'"></label>
+                <template x-if="field.type === 'text'">
+                  <input type="text" disabled class="form-input text-sm" style="opacity:0.5;" :placeholder="field.label_ar">
+                </template>
+                <template x-if="field.type === 'textarea'">
+                  <textarea disabled rows="2" class="form-input text-sm" style="opacity:0.5;resize:none;" :placeholder="field.label_ar"></textarea>
+                </template>
+                <template x-if="field.type === 'select'">
+                  <select disabled class="form-input text-sm" style="opacity:0.5;">
+                    <option>— {{ lang == 'ar' and 'اختر' or 'Select' }} —</option>
+                    <template x-for="opt in field.options_ar" :key="opt">
+                      <option x-text="opt"></option>
+                    </template>
+                  </select>
+                </template>
+                <template x-if="field.type === 'checkbox'">
+                  <div style="display:flex;flex-direction:column;gap:4px;opacity:0.5;">
+                    <template x-for="opt in field.options_ar.slice(0,3)" :key="opt">
+                      <label style="display:flex;align-items:center;gap:8px;font-size:12px;">
+                        <input type="checkbox" disabled> <span x-text="opt"></span>
+                      </label>
+                    </template>
+                  </div>
+                </template>
+              </div>
+
+            </div>
+          </template>
+        </template>
+      </div>
+
+    </div><!-- /grid -->
+  </div>
+
+</div>
+{% endblock %}
