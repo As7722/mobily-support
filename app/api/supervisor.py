@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -54,8 +54,13 @@ def _get_dept_id(request: Request) -> Optional[uuid.UUID]:
             dependencies=[Depends(require_permission("supervisor.view"))])
 async def supervisor_dashboard(
     request: Request,
+    tab: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
+    active_tab = (tab or "overview").strip() or "overview"
+    if active_tab not in ("overview", ""):
+        return RedirectResponse(url=f"/supervisor/{active_tab}", status_code=302)
+
     from sqlalchemy import func, select as _select
     from app.models.ticket import Ticket as _Ticket
 
@@ -89,8 +94,8 @@ async def supervisor_dashboard(
     }
 
     return templates.TemplateResponse(
-        "supervisor/index.html",
-        _ctx(request, workload=workload, violations=violations, queue=queue,
+        "supervisor/hub.html",
+        _ctx(request, active_tab="overview", workload=workload, violations=violations, queue=queue,
              summary=summary, branches=branches, spec_departments=spec_departments),
     )
 
@@ -781,13 +786,12 @@ async def broadcast_email(
     except (ImportError, Exception):
         pass
 
-    db.add(AuditLog(
-        id=uuid.uuid4(),
+    from app.services.audit import log, AuditAction
+    await log(db, AuditAction.BROADCAST_SENT,
         actor_id=uuid.UUID(actor.get("sub", "")) if actor.get("sub") else None,
-        action="broadcast.sent",
-        target_type="broadcast",
-        changes={"subject": subject, "target": target, "recipients_count": len(emails)},
-    ))
+        resource_type="broadcast",
+        new_value={"subject": subject, "target": target, "recipients_count": len(emails)},
+    )
     await db.flush()
 
     return JSONResponse({"ok": True, "recipients": len(emails), "message": t("sup.broadcast_sent", lang=lang)})

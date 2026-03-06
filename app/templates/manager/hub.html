@@ -4,12 +4,26 @@
 
 {% block extra_head %}
 {{ super() }}
+{% if active_tab == 'overview' %}
 <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.45.2/dist/apexcharts.min.js" defer></script>
+{% endif %}
 {% endblock %}
 
 {% block content %}
-{% include 'manager/_overview_body.html' %}
+<div class="p-4 pb-6">
+  {% set hub_tab = active_tab %}
+  {% include 'manager/_tabs_nav.html' %}
+
+  <div id="manager-tab-content">
+    {% if active_tab == 'overview' %}
+      {% include 'manager/_tab_overview.html' %}
+    {% endif %}
+  </div>
+</div>
 {% endblock %}
+
 {% block extra_scripts %}
+{% if active_tab == 'overview' %}
 {% include 'manager/_overview_scripts.html' %}
+{% endif %}
 {% endblock %}

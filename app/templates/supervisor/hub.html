@@ -1,0 +1,16 @@
+{% extends "base_app.html" %}
+{% block title %}{{ t('sup.title', lang=lang) }} — موبايلي{% endblock %}
+{% block page_title %}{{ t('sup.title', lang=lang) }}{% endblock %}
+
+{% block content %}
+<div class="p-4 pb-6">
+  {% set hub_tab = active_tab %}
+  {% include 'supervisor/_tabs_nav.html' %}
+
+  <div id="supervisor-tab-content">
+    {% if active_tab == 'overview' %}
+      {% include 'supervisor/_tab_dashboard.html' %}
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

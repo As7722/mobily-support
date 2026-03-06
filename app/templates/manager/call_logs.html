@@ -3,7 +3,10 @@
 {% block page_title %}{{ lang == 'ar' and 'سجلات المكالمات' or 'Call Logs' }}{% endblock %}
 
 {% block content %}
-<div class="p-6 space-y-5">
+<div class="p-4 pb-6">
+  {% set hub_tab = 'call_logs' %}
+  {% include 'manager/_tabs_nav.html' %}
+  <div class="p-6 space-y-5">
 
   <!-- Header -->
   <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
@@ -148,5 +151,6 @@
   </div>
   {% endif %}
 
+</div>
 </div>
 {% endblock %}

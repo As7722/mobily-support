@@ -87,12 +87,26 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 payload = decode_token(token)
 
                 from app.core.redis import get_redis_pool
+                from app.core.config import settings
+
                 jti = payload.get("jti")
                 if jti:
                     redis = await get_redis_pool()
-                    jti_valid = await redis.exists(f"jti:{jti}")
+                    jti_key = f"jti:{jti}"
+                    idle_key = f"idle:{jti}"
+                    idle_ttl = settings.JWT_IDLE_TIMEOUT_MINUTES * 60
+
+                    jti_valid = await redis.exists(jti_key)
                     if jti_valid:
-                        request.state.user = payload
+                        # Idle timeout: if idle key expired, user was inactive for 10 min → revoke
+                        idle_exists = await redis.exists(idle_key)
+                        if not idle_exists:
+                            await redis.delete(jti_key)
+                            request.state.user = None
+                        else:
+                            request.state.user = payload
+                            # Refresh idle TTL on each request
+                            await redis.expire(idle_key, idle_ttl)
 
             except Exception:
                 request.state.user = None

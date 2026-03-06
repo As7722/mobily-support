@@ -104,7 +104,10 @@ async def get_public_timeline(
     result = await db.execute(
         select(TL)
         .where(TL.ticket_id == ticket_id, TL.is_public.is_(True))
-        .options(selectinload(TL.actor))
+        .options(
+            selectinload(TL.actor),
+            selectinload(TL.attachments),
+        )
         .order_by(asc(TL.created_at))
     )
     return list(result.scalars().all())

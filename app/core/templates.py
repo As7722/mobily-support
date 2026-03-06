@@ -8,6 +8,25 @@ from app.i18n import t as translate_func
 from app.utils.formatters import format_date, format_number
 
 
+def _get_active_theme(request) -> object | None:
+    """Safely get request.state.active_theme for base template (avoids AttributeError)."""
+    return getattr(getattr(request, "state", None), "active_theme", None)
+
+
+def _get_theme_css(request) -> str:
+    """Safely get request.state.theme_css for base template."""
+    return getattr(getattr(request, "state", None), "theme_css", "") or ""
+
+
+def get_effective_permissions(request) -> list:
+    """Safely get request.state.effective_permissions for sidebar (avoids AttributeError)."""
+    state = getattr(request, "state", None)
+    if state is None:
+        return []
+    perms = getattr(state, "effective_permissions", None)
+    return list(perms) if perms is not None else []
+
+
 def _bilingual(obj: object, field: str, lang: str) -> str:
     """
     Pick the correct language column from a SQLAlchemy model instance.
@@ -29,6 +48,9 @@ def _create_templates() -> Jinja2Templates:
     # Translation + bilingual field helpers (available in every template)
     env.globals["t"] = translate_func
     env.globals["bl"] = _bilingual
+    env.globals["get_active_theme"] = _get_active_theme
+    env.globals["get_theme_css"] = _get_theme_css
+    env.globals["get_effective_permissions"] = get_effective_permissions
     env.globals["SUPPORTED_LANGUAGES"] = ["ar", "en"]
 
     # Date / number formatters

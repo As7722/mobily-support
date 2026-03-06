@@ -1,0 +1,94 @@
+<script>
+(function () {
+  const isDark = document.documentElement.classList.contains('dark');
+  const textColor  = isDark ? '#94a3b8' : '#64748b';
+  const gridColor  = isDark ? '#1e293b' : '#f1f5f9';
+
+  /* Channel Donut Chart */
+  const channelData = {{ kpis.channel_breakdown | tojson }};
+  const channelEl = document.getElementById('channel-chart');
+  if (Object.keys(channelData).length > 0 && channelEl) {
+    new ApexCharts(channelEl, {
+      chart: { type: 'donut', height: 220, background: 'transparent', fontFamily: 'inherit' },
+      theme: { mode: isDark ? 'dark' : 'light' },
+      labels: Object.keys(channelData),
+      series: Object.values(channelData),
+      colors: ['#005EB8', '#059669', '#D97706', '#7C3AED'],
+      legend: { position: 'bottom', fontSize: '12px', labels: { colors: textColor } },
+      dataLabels: { style: { fontSize: '11px', fontFamily: 'inherit' } },
+      plotOptions: { pie: { donut: { size: '65%', labels: { show: true, total: { show: true, label: '{{ t("stats.total_tickets", lang=lang) }}', color: textColor } } } } },
+      stroke: { show: false },
+    }).render();
+  } else if (channelEl) {
+    channelEl.innerHTML = '<p class="flex items-center justify-center h-full text-sm py-10" style="color: var(--text-faint);">{{ t("errors.not_found", lang=lang) }}</p>';
+  }
+
+  /* Trend Chart (server-side data) */
+  const trendData = {{ kpis.trend | tojson }};
+  const trendEl = document.getElementById('trend-chart');
+  if (trendEl && trendData.length) {
+    new ApexCharts(trendEl, {
+      chart: { type: 'area', height: 210, background: 'transparent', toolbar: { show: false }, fontFamily: 'inherit' },
+      theme: { mode: isDark ? 'dark' : 'light' },
+      series: [
+        { name: '{{ t("kpi.resolved", lang=lang) }}', data: trendData.map(d => d.resolved) },
+        { name: '{{ t("kpi.total_tickets", lang=lang) }}', data: trendData.map(d => d.created) },
+      ],
+      xaxis: { categories: trendData.map(d => d.date.slice(5)), labels: { style: { colors: textColor, fontSize: '11px' } } },
+      yaxis: { labels: { style: { colors: textColor, fontSize: '11px' } } },
+      colors: ['#059669', '#005EB8'],
+      fill: { type: 'gradient', gradient: { opacityFrom: 0.35, opacityTo: 0.05 } },
+      stroke: { width: 2.5, curve: 'smooth' },
+      dataLabels: { enabled: false },
+      legend: { position: 'top', fontSize: '12px', labels: { colors: textColor } },
+      grid: { borderColor: gridColor, strokeDashArray: 4 },
+      tooltip: { theme: isDark ? 'dark' : 'light' },
+    }).render();
+  }
+
+  /* Priority Bar Chart */
+  const prio = {{ kpis.priority_breakdown | tojson }};
+  const branchEl = document.getElementById('branch-heatmap');
+  if (branchEl && Object.keys(prio).length) {
+    const prioColors = { critical: '#DC2626', high: '#EA580C', medium: '#D97706', low: '#059669' };
+    new ApexCharts(branchEl, {
+      chart: { type: 'bar', height: 180, background: 'transparent', toolbar: { show: false }, fontFamily: 'inherit' },
+      theme: { mode: isDark ? 'dark' : 'light' },
+      series: [{ name: '{{ t("stats.total_tickets", lang=lang) }}', data: Object.values(prio) }],
+      xaxis: { categories: Object.keys(prio), labels: { style: { colors: textColor, fontSize: '12px' } } },
+      yaxis: { labels: { style: { colors: textColor, fontSize: '11px' } } },
+      colors: Object.keys(prio).map(k => prioColors[k] || '#005EB8'),
+      plotOptions: { bar: { borderRadius: 6, distributed: true, columnWidth: '45%' } },
+      dataLabels: { enabled: true, style: { fontSize: '11px', fontFamily: 'inherit' } },
+      legend: { show: false },
+      grid: { borderColor: gridColor, strokeDashArray: 4 },
+      tooltip: { theme: isDark ? 'dark' : 'light' },
+    }).render();
+  }
+
+  /* Peak Hours Heatmap */
+  const peakData = {{ peak_hours | tojson }};
+  const days = {{ (['الأحد','الإثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'] if lang == 'ar' else ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']) | tojson }};
+  const heatSeries = days.map((dayName, dow) => ({
+    name: dayName,
+    data: Array.from({ length: 24 }, (_, hr) => {
+      const found = peakData.find(d => d.dow == dow && d.hr == hr);
+      return { x: hr + ':00', y: found ? found.cnt : 0 };
+    }),
+  }));
+  const peakEl = document.getElementById('peak-hours-heatmap');
+  if (peakEl) {
+    new ApexCharts(peakEl, {
+      chart: { type: 'heatmap', height: 220, background: 'transparent', toolbar: { show: false }, fontFamily: 'inherit' },
+      theme: { mode: isDark ? 'dark' : 'light' },
+      series: heatSeries,
+      dataLabels: { enabled: false },
+      colors: ['#005EB8'],
+      xaxis: { labels: { style: { colors: textColor, fontSize: '10px' } } },
+      yaxis: { labels: { style: { colors: textColor, fontSize: '11px' } } },
+      tooltip: { theme: isDark ? 'dark' : 'light' },
+      legend: { show: false },
+    }).render();
+  }
+})();
+</script>

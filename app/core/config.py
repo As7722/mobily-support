@@ -122,6 +122,7 @@ class Settings(BaseSettings):
         """Key used to verify tokens. RSA public key for RS256, SECRET_KEY for HS256."""
         return self.JWT_PUBLIC_KEY or self.SECRET_KEY
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60   # 1 hour (was 24h — security hardening)
+    JWT_IDLE_TIMEOUT_MINUTES: int = 10         # Log out after 10 min of inactivity
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
     # Argon2id password hashing params
@@ -138,6 +139,16 @@ class Settings(BaseSettings):
     S3_BUCKET_NAME: str = "mobily-support"
     S3_REGION: str = "us-east-1"
     S3_SIGNED_URL_EXPIRY: int = 3600    # 1 hour
+
+    # Local ticket attachments (when S3 not used); overridable via TICKET_UPLOADS_DIR env
+    TICKET_UPLOADS_DIR: str = ""
+
+    @property
+    def ticket_uploads_path(self) -> Path:
+        """Directory for ticket attachment files (local dev and fallback)."""
+        if self.TICKET_UPLOADS_DIR:
+            return Path(self.TICKET_UPLOADS_DIR)
+        return BASE_DIR / "uploads" / "tickets"
 
     # File Upload Limits
     MAX_FILE_SIZE_BYTES: int = 10 * 1024 * 1024   # 10 MB

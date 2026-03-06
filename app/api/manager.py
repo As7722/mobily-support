@@ -7,14 +7,14 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
-from app.core.permissions import require_permission
+from app.core.permissions import DEFAULT_ROLE_PERMISSIONS, invalidate_all_permission_caches, require_permission
 from app.core.redis import get_redis
 from app.core.templates import templates
 from app.i18n import t
@@ -38,24 +38,133 @@ def _ctx(request: Request, **extra) -> dict:
     }
 
 
-# ── GET /manager ───────────────────────────────────────────────────────────────
+# ── GET /manager (unified hub with tabs) ───────────────────────────────────────
 
 @router.get("/manager", response_class=HTMLResponse,
             dependencies=[Depends(require_permission("manager.view"))])
 async def manager_dashboard(
     request: Request,
+    tab: Optional[str] = None,
     period: str = "today",
     db: AsyncSession = Depends(get_db),
-    redis=None,
+    redis=Depends(get_redis),
 ) -> HTMLResponse:
-    from app.core.redis import get_redis
-    kpis      = await get_manager_kpis(db, redis, period)
+    """Unified manager hub: overview tab in-page; other tabs redirect to full pages."""
+    active_tab = (tab or "overview") if (tab and tab.strip()) else "overview"
+    if active_tab != "overview":
+        if active_tab == "audit":
+            return RedirectResponse(url="/manager/settings?tab=audit", status_code=302)
+        if active_tab == "scheduled_reports":
+            return RedirectResponse(url="/manager/settings?tab=reports", status_code=302)
+        path = "call-logs" if active_tab == "call_logs" else ("kb-categories" if active_tab == "kb_categories" else active_tab)
+        return RedirectResponse(url=f"/manager/{path}", status_code=302)
+    from app.models.ticket import Ticket
+    from app.models.user import User
+    from app.models.category import Category
+    from app.models.knowledge import KnowledgeArticle
+    from app.services.kpi import _period_range
+    from sqlalchemy import extract
+    from sqlalchemy.sql import exists as sa_exists
+
+    kpis = await get_manager_kpis(db, redis, period)
     violations = await get_sla_violations(db, limit=5)
-    queue     = await get_smart_queue(db, role="manager", per_page=10)
+    queue = await get_smart_queue(db, role="manager", per_page=10)
+    lang = getattr(request.state, "lang", "ar")
+
+    # ── Top agents (scoped to period) ───────────────────────────────────────────
+    p_start, p_end = _period_range(period)
+    agents_q = await db.execute(
+        select(
+            User.id,
+            User.full_name_ar,
+            User.full_name_en,
+            func.count(Ticket.id).label("resolved"),
+            func.avg(Ticket.csat_score).label("csat"),
+            func.avg(Ticket.total_time_seconds).label("avg_secs"),
+        )
+        .join(Ticket, Ticket.assigned_to == User.id, isouter=True)
+        .where(
+            Ticket.resolved_at >= p_start,
+            Ticket.resolved_at < p_end,
+            Ticket.status.in_(["resolved", "closed"]),
+            Ticket.deleted_at.is_(None),
+        )
+        .group_by(User.id, User.full_name_ar, User.full_name_en)
+        .order_by(func.count(Ticket.id).desc())
+        .limit(10)
+    )
+    top_agents_raw = agents_q.all()
+    max_resolved = max((r.resolved for r in top_agents_raw), default=1)
+    top_agents = [
+        type("A", (), {
+            "full_name_ar": r.full_name_ar or "—",
+            "full_name_en": r.full_name_en or r.full_name_ar or "—",
+            "resolved": r.resolved,
+            "csat_avg": round(float(r.csat or 0), 1) if r.csat else None,
+            "avg_mins": int((r.avg_secs or 0) / 60) if r.avg_secs else None,
+            "pct": int(r.resolved / max(max_resolved, 1) * 100),
+        })()
+        for r in top_agents_raw
+    ]
+
+    # ── Peak hours heatmap (30-day data, dow/hr/cnt) ───────────────────────────
+    heat_start = datetime.now(tz=UTC) - timedelta(days=30)
+    heat_q = await db.execute(
+        select(
+            extract("dow", Ticket.created_at).label("dow"),
+            extract("hour", Ticket.created_at).label("hr"),
+            func.count(Ticket.id).label("cnt"),
+        )
+        .where(Ticket.created_at >= heat_start, Ticket.deleted_at.is_(None))
+        .group_by("dow", "hr")
+    )
+    heat_rows = heat_q.all()
+    heat_map_dict: dict[tuple[int, int], int] = {}
+    for row in heat_rows:
+        heat_map_dict[(int(row.dow), int(row.hr))] = row.cnt
+    peak_hours = [
+        {"dow": d, "hr": h, "cnt": heat_map_dict.get((d, h), 0)}
+        for d in range(7) for h in range(24)
+    ]
+
+    # ── KB gaps ────────────────────────────────────────────────────────────────
+    kb_subq = (
+        select(KnowledgeArticle.id)
+        .where(
+            KnowledgeArticle.category_id == Category.id,
+            KnowledgeArticle.deleted_at.is_(None),
+            KnowledgeArticle.audience == "internal",
+            KnowledgeArticle.is_published.is_(True),
+        )
+        .correlate(Category)
+    )
+    cats_q = await db.execute(
+        select(Category.id, Category.name_ar, Category.name_en, func.count(Ticket.id).label("cnt"))
+        .join(Ticket, Ticket.category_id == Category.id, isouter=True)
+        .where(Ticket.deleted_at.is_(None), ~sa_exists(kb_subq))
+        .group_by(Category.id, Category.name_ar, Category.name_en)
+        .having(func.count(Ticket.id) > 0)
+        .order_by(func.count(Ticket.id).desc())
+        .limit(10)
+    )
+    kb_gaps = [
+        {"topic": r.name_ar, "topic_en": r.name_en, "count": r.cnt}
+        for r in cats_q.all()
+    ]
 
     return templates.TemplateResponse(
-        "manager/index.html",
-        _ctx(request, kpis=kpis, violations=violations, queue=queue, period=period),
+        "manager/hub.html",
+        _ctx(
+            request,
+            active_tab=active_tab,
+            kpis=kpis,
+            violations=violations,
+            queue=queue,
+            period=period,
+            top_agents=top_agents,
+            peak_hours=peak_hours,
+            kb_gaps=kb_gaps,
+        ),
     )
 
 
@@ -74,40 +183,60 @@ async def kpis_json(
 
 # ── GET /manager/settings ──────────────────────────────────────────────────────
 
-@router.get("/manager/users", response_class=HTMLResponse,
-            dependencies=[Depends(require_permission("manager.view"))])
+@router.get("/manager/users", response_class=HTMLResponse)
 async def manager_users(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
-    """Manager-only user management page: full user CRUD + department assignment."""
+    """User management page: allowed for manager and admin only. Manager cannot manage admin users."""
+    import traceback
     from app.models.user import User
     from app.models.department import Department, UserDepartment
 
-    users = list((await db.execute(
-        select(User).where(User.deleted_at.is_(None))
-        .options(selectinload(User.department))
-        .order_by(User.role, User.full_name_ar)
-    )).scalars().all())
+    payload = getattr(request.state, "user", None)
+    if not payload:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=t("errors.unauthorized", lang=getattr(request.state, "lang", "ar")))
+    role = (payload.get("role") or "").strip().lower()
+    if role not in ("manager", "admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=t("errors.permission_denied", lang=getattr(request.state, "lang", "ar")))
 
-    departments = list((await db.execute(
-        select(Department).where(Department.deleted_at.is_(None), Department.is_active.is_(True))
-        .order_by(Department.name_ar)
-    )).scalars().all())
+    try:
+        users = list((await db.execute(
+            select(User).where(User.deleted_at.is_(None))
+            .options(selectinload(User.department))
+            .order_by(User.role, User.full_name_ar)
+        )).scalars().all())
 
-    # Load user→departments mapping
-    all_ud = list((await db.execute(select(UserDepartment))).all())
-    user_dept_map: dict[str, list[str]] = {}
-    for ud in all_ud:
-        uid_str = str(ud.user_id)
-        did_str = str(ud.department_id)
-        user_dept_map.setdefault(uid_str, []).append(did_str)
+        departments = list((await db.execute(
+            select(Department).where(Department.deleted_at.is_(None), Department.is_active.is_(True))
+            .order_by(Department.name_ar)
+        )).scalars().all())
 
-    return templates.TemplateResponse(
-        "manager/users.html",
-        _ctx(request, users=users, departments=departments, user_dept_map=user_dept_map,
-             current_role=(getattr(request.state, "user", {}) or {}).get("role", "")),
-    )
+        # Load user→departments mapping (Row: 0=user_id, 1=department_id)
+        result_ud = await db.execute(select(UserDepartment.user_id, UserDepartment.department_id))
+        rows_ud = result_ud.all()
+        user_dept_map: dict[str, list[str]] = {}
+        for row in rows_ud:
+            uid_str = str(row[0])
+            did_str = str(row[1])
+            user_dept_map.setdefault(uid_str, []).append(did_str)
+
+        ctx = _ctx(
+            request,
+            users=users,
+            departments=departments,
+            user_dept_map=user_dept_map,
+            current_role=(getattr(request.state, "user", {}) or {}).get("role", ""),
+        )
+        # Render now so any template error is caught below
+        html = templates.env.get_template("manager/users.html").render(**ctx)
+        return HTMLResponse(html)
+    except Exception:
+        # Show traceback so we can fix the root cause (remove after fix)
+        return HTMLResponse(
+            f"<pre style='white-space:pre-wrap;font-size:12px;'>manager/users error:\n{traceback.format_exc()}</pre>",
+            status_code=500,
+        )
 
 
 @router.get("/manager/settings", response_class=HTMLResponse,
@@ -141,23 +270,36 @@ async def manager_settings(
         select(AutomationRule).where(AutomationRule.deleted_at.is_(None)).order_by(AutomationRule.created_at.desc())
     )).scalars().all())
 
+    # Exclude admin so report shows all other users (employee, supervisor, manager, portal)
     audit_logs = list((await db.execute(
-        select(AuditLog).order_by(AuditLog.created_at.desc()).limit(100)
+        select(AuditLog)
+        .options(selectinload(AuditLog.actor))
+        .where(or_(AuditLog.actor_role.is_(None), AuditLog.actor_role != "admin"))
+        .order_by(AuditLog.created_at.desc())
+        .limit(500)
     )).scalars().all())
 
     notif_rules = list((await db.execute(
         select(NotificationRule).order_by(NotificationRule.event_type)
     )).scalars().all())
 
+    from app.models.user import User
+    audit_filter_users = list((await db.execute(
+        select(User).where(User.is_active.is_(True), User.deleted_at.is_(None)).order_by(User.full_name_ar)
+    )).scalars().all())
+
     # Call reason fields from Redis (multi-field format)
     from app.api.dashboard import _get_call_reason_fields
+    from app.services.reports import REPORT_TYPES
     call_reason_cfg = {"fields": await _get_call_reason_fields(redis)}
 
+    hub_tab = "audit" if tab == "audit" else ("scheduled_reports" if tab == "reports" else "settings")
     return templates.TemplateResponse(
         "manager/settings.html",
         _ctx(
             request,
             active_tab=tab,
+            hub_tab=hub_tab,
             form_versions=form_versions,
             active_form_schema=active_form_schema,
             sla_policies=sla_policies,
@@ -165,7 +307,421 @@ async def manager_settings(
             audit_logs=audit_logs,
             notif_rules=notif_rules,
             call_reason_cfg=call_reason_cfg,
+            report_types=REPORT_TYPES,
+            audit_filter_users=audit_filter_users,
         ),
+    )
+
+
+# ── GET /api/manager/audit/export (Excel) ───────────────────────────────────────
+
+def _audit_action_label(action: str, lang: str) -> str:
+    """Human-readable label for audit action codes."""
+    _labels_ar = {
+        "auth.login": "تسجيل دخول",
+        "auth.logout": "تسجيل خروج",
+        "auth.login_failed": "فشل تسجيل الدخول",
+        "auth.password_reset": "إعادة تعيين كلمة المرور",
+        "user.create": "إنشاء مستخدم",
+        "user.update": "تحديث مستخدم",
+        "user.delete": "حذف مستخدم",
+        "user.role_changed": "تغيير دور المستخدم",
+        "user.toggle_active": "تفعيل/إيقاف مستخدم",
+        "ticket.create": "إنشاء تذكرة",
+        "ticket.update": "تحديث تذكرة",
+        "ticket.assign": "تعيين تذكرة",
+        "ticket.status_change": "تغيير حالة تذكرة",
+        "ticket.resolve": "حل تذكرة",
+        "ticket.close": "إغلاق تذكرة",
+        "ticket.comment": "تعليق/رد على تذكرة",
+        "ticket.merge": "دمج تذاكر",
+        "ticket.split": "تقسيم تذكرة",
+        "ticket.escalate": "تصعيد تذكرة",
+        "sla.create": "إنشاء SLA",
+        "sla.update": "تحديث SLA",
+        "sla.delete": "حذف SLA",
+        "automation.create": "إنشاء قاعدة تشغيل تلقائي",
+        "automation.update": "تحديث قاعدة تشغيل تلقائي",
+        "automation.delete": "حذف قاعدة تشغيل تلقائي",
+        "notification.toggle": "تفعيل/إيقاف إشعار",
+        "department.create": "إنشاء قسم",
+        "department.update": "تحديث قسم",
+        "kb.create": "إنشاء مقالة قاعدة معرفة",
+        "kb.update": "تحديث مقالة قاعدة معرفة",
+        "kb.delete": "حذف مقالة قاعدة معرفة",
+        "report.scheduled": "جدولة تقرير",
+        "export.audit": "تصدير سجل التدقيق",
+        "export.tickets": "تصدير التذاكر",
+        "portal.track": "تتبع تذكرة (بورتال)",
+        "portal.view": "عرض تذكرة (بورتال)",
+        "portal.reply": "رد عميل (بورتال)",
+        "portal.csat_submit": "تقييم CSAT (بورتال)",
+        "portal.register_employee": "طلب تسجيل موظف فرع (بورتال)",
+    }
+    _labels_en = {
+        "auth.login": "Login",
+        "auth.logout": "Logout",
+        "auth.login_failed": "Login failed",
+        "user.create": "User created",
+        "user.update": "User updated",
+        "ticket.create": "Ticket created",
+        "ticket.update": "Ticket updated",
+        "ticket.assign": "Ticket assigned",
+        "ticket.status_change": "Status changed",
+        "ticket.resolve": "Ticket resolved",
+        "ticket.close": "Ticket closed",
+        "ticket.comment": "Comment/Reply on ticket",
+        "ticket.merge": "Tickets merged",
+        "ticket.split": "Ticket split",
+        "ticket.escalate": "Ticket escalated",
+        "sla.create": "SLA created",
+        "sla.update": "SLA updated",
+        "report.scheduled": "Report scheduled",
+        "export.audit": "Audit export",
+        "portal.track": "Track ticket (portal)",
+        "portal.view": "View ticket (portal)",
+        "portal.reply": "Customer reply (portal)",
+        "portal.csat_submit": "CSAT submit (portal)",
+        "portal.register_employee": "Register employee request (portal)",
+    }
+    d = _labels_ar if lang == "ar" else _labels_en
+    return d.get(action, action or "—")
+
+
+def _audit_resource_label(resource_type: str, lang: str) -> str:
+    """Human-readable label for resource types."""
+    _ar = {"tickets": "التذاكر", "users": "المستخدمون", "sla_policies": "سياسات SLA", "audit_log": "سجل التدقيق",
+           "scheduled_reports": "التقارير المجدولة", "notification_rules": "قواعد الإشعارات", "departments": "الأقسام",
+           "categories": "التصنيفات", "knowledge_articles": "قاعدة المعرفة", "form_versions": "إصدارات النماذج"}
+    _en = {"tickets": "Tickets", "users": "Users", "sla_policies": "SLA policies", "audit_log": "Audit log",
+           "scheduled_reports": "Scheduled reports", "notification_rules": "Notification rules", "departments": "Departments"}
+    d = _ar if lang == "ar" else _en
+    return d.get(resource_type, resource_type or "—")
+
+
+def _parse_audit_date(s: Optional[str]) -> Optional[datetime]:
+    """Parse YYYY-MM-DD to datetime at 00:00:00 UTC."""
+    if not s or not s.strip():
+        return None
+    try:
+        from datetime import date as date_type
+        parts = s.strip().split("-")
+        if len(parts) != 3:
+            return None
+        y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+        return datetime(y, m, d, 0, 0, 0, tzinfo=UTC)
+    except (ValueError, IndexError):
+        return None
+
+
+@router.get("/api/manager/audit/export",
+            dependencies=[Depends(require_permission("manager.settings"))])
+async def export_audit_log(
+    request: Request,
+    resource_type: Optional[str] = None,
+    action: Optional[str] = None,
+    days: Optional[int] = 90,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    hour_from: Optional[int] = None,
+    minute_from: Optional[int] = None,
+    hour_to: Optional[int] = None,
+    minute_to: Optional[int] = None,
+    actor_id: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    """Export audit log to Excel — enterprise-grade report with full filters (date, time, user, action, resource)."""
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+        from openpyxl.utils import get_column_letter
+        import json as _json
+    except ImportError:
+        raise HTTPException(500, "openpyxl not installed")
+
+    from app.models.audit import AuditLog
+
+    lang = getattr(request.state, "lang", "ar")
+    now = datetime.now(tz=UTC)
+    start_dt: Optional[datetime] = None
+    end_dt: Optional[datetime] = None
+    period_desc = ""
+    days = min(max(1, days or 90), 365)
+
+    if date_from or date_to:
+        start_dt = _parse_audit_date(date_from) or _parse_audit_date(date_to) or (now - timedelta(days=90))
+        end_dt = _parse_audit_date(date_to) or _parse_audit_date(date_from) or now
+        if end_dt < start_dt:
+            start_dt, end_dt = end_dt, start_dt
+        h_f = hour_from if hour_from is not None and 0 <= hour_from <= 23 else 0
+        m_f = minute_from if minute_from is not None and 0 <= minute_from <= 59 else 0
+        h_t = hour_to if hour_to is not None and 0 <= hour_to <= 23 else 23
+        m_t = minute_to if minute_to is not None and 0 <= minute_to <= 59 else 59
+        start_dt = start_dt.replace(hour=h_f, minute=m_f, second=0, microsecond=0)
+        end_dt = end_dt.replace(hour=h_t, minute=m_t, second=59, microsecond=999999)
+        period_desc = f"{start_dt.strftime('%Y-%m-%d %H:%M')} — {end_dt.strftime('%Y-%m-%d %H:%M')} UTC"
+    else:
+        start_dt = now - timedelta(days=days)
+        end_dt = now
+        period_desc = f"last {days} days" if lang == "en" else f"آخر {days} يوم"
+
+    # Exclude admin so export shows all other users (employee, supervisor, manager, portal)
+    q = (
+        select(AuditLog)
+        .options(selectinload(AuditLog.actor))
+        .where(
+            AuditLog.created_at >= start_dt,
+            AuditLog.created_at <= end_dt,
+            or_(AuditLog.actor_role.is_(None), AuditLog.actor_role != "admin"),
+        )
+        .order_by(AuditLog.created_at.desc())
+        .limit(50000)
+    )
+    if resource_type:
+        q = q.where(AuditLog.resource_type == resource_type)
+    if action:
+        q = q.where(AuditLog.action == action)
+    if actor_id:
+        try:
+            q = q.where(AuditLog.actor_id == uuid.UUID(actor_id))
+        except (ValueError, TypeError):
+            pass
+
+    logs = list((await db.execute(q)).scalars().all())
+
+    from app.services.audit import log_from_request, AuditAction
+    await log_from_request(db, request, AuditAction.EXPORT_AUDIT,
+        resource_type="audit_export",
+        new_value={"count": len(logs), "date_from": date_from, "date_to": date_to, "resource_type": resource_type, "action": action, "actor_id": actor_id},
+    )
+    await db.commit()
+
+    wb = openpyxl.Workbook()
+    header_font_white = Font(bold=True, size=11, color="FFFFFF")
+    header_fill = PatternFill(start_color="00AEEF", end_color="00AEEF", fill_type="solid")
+    thin_border = Border(
+        left=Side(style="thin"), right=Side(style="thin"),
+        top=Side(style="thin"), bottom=Side(style="thin"),
+    )
+
+    # ── Sheet 1: Cover / Summary ─────────────────────────────────────────────
+    ws_cover = wb.active
+    ws_cover.title = "Cover" if lang == "en" else "الغلاف"
+    title = "Audit Log Report — Full Traceability" if lang == "en" else "تقرير سجل التدقيق — تتبع كامل"
+    ws_cover["A1"] = title
+    ws_cover["A1"].font = Font(bold=True, size=16)
+    ws_cover.merge_cells("A1:D1")
+    ws_cover["A2"] = f"Generated: {datetime.now(tz=UTC).strftime('%Y-%m-%d %H:%M UTC')}" if lang == "en" else f"تاريخ التوليد: {datetime.now(tz=UTC).strftime('%Y-%m-%d %H:%M UTC')}"
+    ws_cover["A3"] = f"Total events: {len(logs)}" if lang == "en" else f"إجمالي الأحداث: {len(logs)}"
+    ws_cover["A4"] = f"Period: {period_desc}" if lang == "en" else f"الفترة: {period_desc}"
+    row_cover = 5
+    if date_from:
+        ws_cover[f"A{row_cover}"] = f"From date: {date_from}" if lang == "en" else f"من تاريخ: {date_from}"
+        row_cover += 1
+    if date_to:
+        ws_cover[f"A{row_cover}"] = f"To date: {date_to}" if lang == "en" else f"إلى تاريخ: {date_to}"
+        row_cover += 1
+    if hour_from is not None or hour_to is not None:
+        m_f = f"{(minute_from or 0):02d}"
+        m_t = f"{(minute_to or 59):02d}"
+        t_range = f"{hour_from or 0}:{m_f} — {hour_to or 23}:{m_t}" if lang == "en" else f"{hour_from or 0}:{m_f} — {hour_to or 23}:{m_t}"
+        ws_cover[f"A{row_cover}"] = f"Time range: {t_range}" if lang == "en" else f"الفترة الزمنية: {t_range}"
+        row_cover += 1
+    if resource_type:
+        ws_cover[f"A{row_cover}"] = (f"Filter — Resource: {_audit_resource_label(resource_type, lang)}" if lang == "en"
+                          else f"تصفية — المورد: {_audit_resource_label(resource_type, lang)}")
+        row_cover += 1
+    if action:
+        ws_cover[f"A{row_cover}"] = (f"Filter — Action: {_audit_action_label(action, lang)}" if lang == "en"
+                          else f"تصفية — الإجراء: {_audit_action_label(action, lang)}")
+        row_cover += 1
+    if actor_id:
+        ws_cover[f"A{row_cover}"] = f"Filter — User ID: {actor_id}" if lang == "en" else f"تصفية — المستخدم: {actor_id}"
+        row_cover += 1
+    row_cover += 1
+    ws_cover[f"A{row_cover}"] = "What is this report?" if lang == "en" else "ما هذا التقرير؟"
+    ws_cover[f"A{row_cover}"].font = Font(bold=True, size=12)
+    row_cover += 1
+    ws_cover[f"A{row_cover}"] = ("Every change in the system (logins, ticket updates, settings, portal, etc.) is recorded with date, user (or IP), and details."
+                      if lang == "en" else
+                      "كل تغيير في النظام (تسجيل الدخول، التذاكر، الإعدادات، البورتال، إلخ) مُسجّل مع التاريخ والمستخدم (أو IP) والتفاصيل.")
+    row_cover += 1
+    ws_cover[f"A{row_cover}"] = ("Sheets: Data = all events; By User = count per user; By Action = count per action; Legend = codes."
+                       if lang == "en" else "الأوراق: البيانات = كل الأحداث؛ حسب المستخدم = العدد لكل مستخدم؛ حسب الإجراء = العدد لكل إجراء؛ دليل الرموز.")
+    row_cover += 1
+    for r in range(1, row_cover + 1):
+        ws_cover.row_dimensions[r].height = 22
+    ws_cover.column_dimensions["A"].width = 58
+
+    # ── Sheet 2: Summary by User ────────────────────────────────────────────
+    from collections import Counter
+    by_actor: Counter = Counter()
+    for log in logs:
+        key = str(log.actor_id) if log.actor_id else ("—" if lang == "ar" else "Guest/IP")
+        by_actor[key] += 1
+    ws_user = wb.create_sheet("By User" if lang == "en" else "حسب المستخدم", 1)
+    ws_user["A1"] = "User / Actor" if lang == "en" else "المستخدم"
+    ws_user["B1"] = "Count" if lang == "en" else "العدد"
+    ws_user["A1"].font = ws_user["B1"].font = header_font_white
+    ws_user["A1"].fill = ws_user["B1"].fill = header_fill
+    actor_display: dict[str, str] = {}
+    for log in logs:
+        if log.actor_id:
+            k = str(log.actor_id)
+            if k not in actor_display and log.actor:
+                actor_display[k] = (log.actor.full_name_ar if lang == "ar" else (log.actor.full_name_en or log.actor.full_name_ar)) or log.actor.username or k
+            elif k not in actor_display:
+                actor_display[k] = k
+    for idx, (actor_key, count) in enumerate(sorted(by_actor.items(), key=lambda x: -x[1]), 2):
+        if actor_key not in ("—", "Guest/IP"):
+            display = actor_display.get(actor_key, actor_key)
+        else:
+            display = "— (Portal/Guest)" if lang == "en" else "— (بورتال/زائر)"
+        ws_user.cell(row=idx, column=1, value=display)
+        ws_user.cell(row=idx, column=2, value=count)
+    ws_user.column_dimensions["A"].width = 35
+    ws_user.column_dimensions["B"].width = 10
+
+    # ── Sheet 3: Summary by Action ──────────────────────────────────────────
+    by_action: Counter = Counter()
+    for log in logs:
+        by_action[log.action or ""] += 1
+    ws_act = wb.create_sheet("By Action" if lang == "en" else "حسب الإجراء", 2)
+    ws_act["A1"] = "Action (code)" if lang == "en" else "الإجراء (رمز)"
+    ws_act["B1"] = "Label" if lang == "en" else "التسمية"
+    ws_act["C1"] = "Count" if lang == "en" else "العدد"
+    for c in ("A1", "B1", "C1"):
+        ws_act[c].font = header_font_white
+        ws_act[c].fill = header_fill
+    for idx, (act_code, count) in enumerate(sorted(by_action.items(), key=lambda x: -x[1]), 2):
+        ws_act.cell(row=idx, column=1, value=act_code or "—")
+        ws_act.cell(row=idx, column=2, value=_audit_action_label(act_code, lang))
+        ws_act.cell(row=idx, column=3, value=count)
+    ws_act.column_dimensions["A"].width = 32
+    ws_act.column_dimensions["B"].width = 28
+    ws_act.column_dimensions["C"].width = 10
+
+    # ── Sheet 4: Legend ────────────────────────────────────────────────────
+    ws_leg = wb.create_sheet("Legend" if lang == "en" else "دليل الرموز", 3)
+    leg_title = "Action & resource codes — quick reference" if lang == "en" else "رموز الإجراءات والموارد — مرجع سريع"
+    ws_leg["A1"] = leg_title
+    ws_leg["A1"].font = Font(bold=True, size=12)
+    ws_leg.merge_cells("A1:C1")
+    ws_leg["A2"] = "Action (code)" if lang == "en" else "الإجراء (الرمز)"
+    ws_leg["B2"] = "Meaning" if lang == "en" else "المعنى"
+    ws_leg["A2"].font = ws_leg["B2"].font = Font(bold=True)
+    row = 3
+    for code, meaning_ar in [
+        ("auth.login", "تسجيل دخول"),
+        ("auth.logout", "تسجيل خروج"),
+        ("user.create / user.update", "إنشاء أو تحديث مستخدم"),
+        ("ticket.create / ticket.update / ticket.assign", "إنشاء أو تحديث أو تعيين تذكرة"),
+        ("ticket.status_change / ticket.resolve / ticket.close", "تغيير حالة أو حل أو إغلاق تذكرة"),
+        ("sla.create / sla.update / sla.delete", "إنشاء أو تحديث أو حذف سياسة SLA"),
+        ("report.scheduled", "جدولة تقرير"),
+        ("export.audit", "تصدير سجل التدقيق"),
+        ("portal.track", "تتبع تذكرة من البورتال"),
+        ("portal.view", "عرض صفحة التذكرة من البورتال"),
+        ("portal.reply", "رد العميل من البورتال"),
+        ("portal.csat_submit", "إرسال تقييم CSAT من البورتال"),
+        ("portal.register_employee", "طلب تسجيل موظف فرع من البورتال"),
+    ]:
+        ws_leg.cell(row=row, column=1, value=code)
+        ws_leg.cell(row=row, column=2, value=meaning_ar if lang == "ar" else code.replace(".", " — "))
+        row += 1
+    ws_leg["A14"] = "Resource type" if lang == "en" else "نوع المورد"
+    ws_leg["A14"].font = Font(bold=True)
+    ws_leg["A15"] = "tickets = التذاكر" if lang == "ar" else "tickets = Tickets"
+    ws_leg["A16"] = "users = المستخدمون" if lang == "ar" else "users = Users"
+    ws_leg["A17"] = "sla_policies = سياسات SLA" if lang == "ar" else "sla_policies = SLA policies"
+    ws_leg.column_dimensions["A"].width = 42
+    ws_leg.column_dimensions["B"].width = 35
+
+    # ── Sheet 5: Data (full log) ─────────────────────────────────────────────
+    ws = wb.create_sheet("Data" if lang == "en" else "البيانات", 4)
+    headers = [
+        "No." if lang == "en" else "م",
+        "Date & time" if lang == "en" else "التاريخ والوقت",
+        "Action" if lang == "en" else "الإجراء",
+        "Action (code)" if lang == "en" else "الإجراء (رمز)",
+        "Resource" if lang == "en" else "المورد",
+        "Resource ID" if lang == "en" else "معرف المورد",
+        "User" if lang == "en" else "المستخدم",
+        "Role" if lang == "en" else "الدور",
+        "IP" if lang == "en" else "عنوان IP",
+        "Details (summary)" if lang == "en" else "ملخص التفاصيل",
+        "Full details (JSON)" if lang == "en" else "التفاصيل الكاملة",
+    ]
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.font = header_font_white
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = thin_border
+
+    def _summary_detail(log) -> str:
+        """Short human-readable summary of old_value/new_value."""
+        if log.new_value and isinstance(log.new_value, dict):
+            keys = list(log.new_value.keys())[:5]
+            return ", ".join(f"{k}={log.new_value.get(k)}" for k in keys if log.new_value.get(k) is not None)
+        if log.old_value and isinstance(log.old_value, dict):
+            keys = list(log.old_value.keys())[:5]
+            return ", ".join(f"{k}={log.old_value.get(k)}" for k in keys if log.old_value.get(k) is not None)
+        return ""
+
+    for row_idx, log in enumerate(logs, 2):
+        actor_name = "—"
+        if log.actor:
+            actor_name = (log.actor.full_name_ar if lang == "ar" else (log.actor.full_name_en or log.actor.full_name_ar)) or log.actor.username or "—"
+        else:
+            actor_name = "Portal (Visitor)" if lang == "en" else "بورتال / زائر"
+            if log.actor_ip:
+                actor_name += f" ({log.actor_ip})"
+
+        action_display = _audit_action_label(log.action or "", lang)
+        resource_display = _audit_resource_label(log.resource_type or "", lang)
+        new_str = _json.dumps(log.new_value, ensure_ascii=False) if log.new_value else ""
+        old_str = _json.dumps(log.old_value, ensure_ascii=False) if log.old_value else ""
+        details_full = (new_str or old_str).strip()
+        if len(details_full) > 8000:
+            details_full = details_full[:8000] + "..."
+        summary = _summary_detail(log)
+
+        created_str = log.created_at.strftime("%Y-%m-%d %H:%M:%S") if log.created_at else ""
+
+        row_data = [
+            row_idx - 1,
+            created_str,
+            action_display,
+            log.action or "",
+            resource_display,
+            str(log.resource_id) if log.resource_id else "",
+            actor_name,
+            log.actor_role or "",
+            str(log.actor_ip) if log.actor_ip else "",
+            summary[:500] if summary else "—",
+            details_full or "—",
+        ]
+        for col_idx, val in enumerate(row_data, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.border = thin_border
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+
+    for col in range(1, len(headers) + 1):
+        ws.column_dimensions[get_column_letter(col)].width = min(max(10, len(str(headers[col - 1])) + 2), 45)
+
+    import io as _io
+    buf = _io.BytesIO()
+    wb.save(buf)
+    body = buf.getvalue()
+    filename = f"audit_log_{datetime.now(tz=UTC).strftime('%Y-%m-%d_%H%M')}.xlsx"
+    return StreamingResponse(
+        iter([body]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(body)),
+        },
     )
 
 
@@ -184,6 +740,12 @@ async def toggle_notif_rule(
     if not rule:
         raise HTTPException(404)
     rule.is_active = not rule.is_active
+    from app.services.audit import log_from_request, AuditAction
+    await log_from_request(db, request, AuditAction.NOTIFICATION_TOGGLE,
+        resource_type="notification_rules",
+        resource_id=rule.id,
+        new_value={"rule_id": str(rule.id), "is_active": rule.is_active},
+    )
     await db.commit()
     return JSONResponse({"ok": True, "is_active": rule.is_active})
 
@@ -270,14 +832,16 @@ async def upsert_sla_policy(
         policy.updated_at           = now
 
         # Audit log
-        db.add(AuditLog(
-            id=uuid.uuid4(),
-            table_name="sla_policies",
-            record_id=policy.id,
-            action="update" if policy_id else "create",
-            changed_by=uuid.UUID(actor_id_str) if actor_id_str else None,
-            created_at=now,
-        ))
+        from app.services.audit import log, AuditAction
+        actor_id = uuid.UUID(actor_id_str) if actor_id_str else None
+        await log(
+            db,
+            AuditAction.SLA_POLICY_UPDATE if policy_id else AuditAction.SLA_POLICY_CREATE,
+            actor_id=actor_id,
+            resource_type="sla_policies",
+            resource_id=policy.id,
+            new_value={"name_ar": name_ar, "priority": priority, "response_minutes": response_minutes, "resolution_minutes": resolution_minutes},
+        )
 
     return JSONResponse({"ok": True, "id": str(policy.id)})
 
@@ -340,189 +904,12 @@ async def delete_automation(
 
 
 # ── GET /manager/analytics ────────────────────────────────────────────────────
+# Redirect to merged manager dashboard (analytics merged into /manager)
 
-@router.get("/manager/analytics", response_class=HTMLResponse,
+@router.get("/manager/analytics",
             dependencies=[Depends(require_permission("manager.view"))])
-async def manager_analytics(
-    request: Request,
-    period: str = "month",
-    db: AsyncSession = Depends(get_db),
-) -> HTMLResponse:
-    import json as _json
-    from app.models.ticket import Ticket
-    from app.models.user import User
-    from app.models.category import Category
-
-    lang = getattr(request.state, "lang", "ar")
-    kpis = await get_manager_kpis(db, None, period)
-
-    # ── Top agents (scoped to period) ──────────────────────────────────────
-    from app.services.kpi import _period_range
-    p_start, p_end = _period_range(period)
-    agents_q = await db.execute(
-        select(
-            User.id,
-            User.full_name_ar,
-            User.full_name_en,
-            func.count(Ticket.id).label("resolved"),
-            func.avg(Ticket.csat_score).label("csat"),
-        )
-        .join(Ticket, Ticket.assigned_to == User.id, isouter=True)
-        .where(
-            Ticket.resolved_at >= p_start,
-            Ticket.resolved_at < p_end,
-            Ticket.status.in_(["resolved", "closed"]),
-            Ticket.deleted_at.is_(None),
-        )
-        .group_by(User.id, User.full_name_ar, User.full_name_en)
-        .order_by(func.count(Ticket.id).desc())
-        .limit(10)
-    )
-    top_agents_raw = agents_q.all()
-    max_resolved = max((r.resolved for r in top_agents_raw), default=1)
-    top_agents = [
-        type("A", (), {
-            "name_ar": r.full_name_ar or "—",
-            "name_en": r.full_name_en or r.full_name_ar or "—",
-            "resolved": r.resolved,
-            "csat": round(float(r.csat or 0), 1),
-            "pct": int(r.resolved / max(max_resolved, 1) * 100),
-        })()
-        for r in top_agents_raw
-    ]
-
-    # ── Peak-hour heatmap (real data from DB) ──────────────────────────────
-    from sqlalchemy import extract
-    from app.services.kpi import _period_range as _pr
-    # Use last-30-days heatmap data for meaningful volume
-    from datetime import timedelta as _td
-    heat_start = datetime.now(tz=UTC) - _td(days=30)
-    heat_q = await db.execute(
-        select(
-            extract("dow", Ticket.created_at).label("dow"),
-            extract("hour", Ticket.created_at).label("hr"),
-            func.count(Ticket.id).label("cnt"),
-        )
-        .where(Ticket.created_at >= heat_start, Ticket.deleted_at.is_(None))
-        .group_by("dow", "hr")
-    )
-    heat_rows = heat_q.all()
-    # dow: 0=Sunday … 6=Saturday; show Sun–Thu (workdays)
-    day_names_ar = {0: "الأحد", 1: "الاثنين", 2: "الثلاثاء", 3: "الأربعاء", 4: "الخميس"}
-    day_names_en = {0: "Sun", 1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu"}
-    day_names = day_names_ar if lang == "ar" else day_names_en
-    # Build a dict (dow, hr) → count
-    heat_map_dict: dict[tuple[int, int], int] = {}
-    for row in heat_rows:
-        heat_map_dict[(int(row.dow), int(row.hr))] = row.cnt
-    heatmap = [
-        {
-            "day": day_names[d],
-            "hours": [heat_map_dict.get((d, h), 0) for h in range(8, 18)],
-        }
-        for d in range(5)
-    ]
-    heatmap_max = max((v for row in heatmap for v in row["hours"]), default=1) or 1
-
-    # ── KB gap analysis: categories with tickets but NO KB articles ────────
-    from app.models.knowledge import KnowledgeArticle
-    from sqlalchemy import exists as sa_exists
-
-    kb_subq = (
-        select(KnowledgeArticle.id)
-        .where(
-            KnowledgeArticle.category_id == Category.id,
-            KnowledgeArticle.deleted_at.is_(None),
-            KnowledgeArticle.audience == "internal",
-            KnowledgeArticle.is_published.is_(True),
-        )
-        .correlate(Category)
-    )
-    cats_q = await db.execute(
-        select(Category.id, Category.name_ar, Category.name_en, func.count(Ticket.id).label("cnt"))
-        .join(Ticket, Ticket.category_id == Category.id, isouter=True)
-        .where(
-            Ticket.deleted_at.is_(None),
-            ~sa_exists(kb_subq),
-        )
-        .group_by(Category.id, Category.name_ar, Category.name_en)
-        .having(func.count(Ticket.id) > 0)
-        .order_by(func.count(Ticket.id).desc())
-        .limit(10)
-    )
-    kb_gaps = [
-        {"topic": r.name_ar, "topic_en": r.name_en, "count": r.cnt}
-        for r in cats_q.all()
-    ]
-
-    # ── analytics_json for ApexCharts ─────────────────────────────────────
-    trend = kpis.get("trend", [])
-    channel_breakdown = kpis.get("channel_breakdown", {})
-    analytics_json = {
-        "trend_dates":     [d["date"] for d in trend],
-        "trend_resolved":  [d["resolved"] for d in trend],
-        "trend_submitted": [d["created"] for d in trend],
-        "channel_counts": [
-            channel_breakdown.get("portal", 0),
-            channel_breakdown.get("whatsapp", 0),
-            channel_breakdown.get("email", 0),
-            channel_breakdown.get("phone", 0),
-        ],
-        "channel_labels": ["Portal", "WhatsApp", "Email", "Phone"],
-    }
-
-    # ── Build KPI display object (correct field mapping) ──────────────────
-    avg_mins = kpis.get("avg_resolution_mins", 0) or 0
-    avg_res_display = (
-        f"{round(avg_mins / 60, 1)}h" if avg_mins >= 60
-        else f"{avg_mins}m"
-    )
-    avg_csat_val = kpis.get("avg_csat") or 0
-
-    kpis_obj = type("K", (), {
-        "total":              kpis.get("total_tickets", 0),
-        "total_tickets":      kpis.get("total_tickets", 0),
-        "resolved":           kpis.get("resolved_tickets", 0),
-        "resolved_tickets":   kpis.get("resolved_tickets", 0),
-        "sla_pct":            kpis.get("sla_compliance_pct", 0),
-        "sla_compliance_pct": kpis.get("sla_compliance_pct", 0),
-        "avg_resolution":     avg_res_display,
-        "avg_resolution_mins": kpis.get("avg_resolution_mins", 0) or 0,
-        "csat":               round(float(avg_csat_val), 1),
-        "fcr_pct":            kpis.get("fcr_pct", 0),
-        "reopen_pct":         kpis.get("reopen_pct", 0),
-        "open_count":         kpis.get("open_tickets", 0),
-        "channel_breakdown":  channel_breakdown,
-        "total_change": None, "resolved_change": None, "sla_change": None,
-        "resolution_change": None, "res_change": None,
-        "csat_change": None,  "fcr_change": None, "reopen_change": None,
-    })()
-
-    peak_hours = [
-        {"hour": h, "count": heat_map_dict.get((d, h), 0)}
-        for h in range(8, 18)
-        for d in range(5)
-    ]
-    peak_hours_agg: list[dict] = []
-    for h in range(8, 18):
-        total = sum(heat_map_dict.get((d, h), 0) for d in range(5))
-        peak_hours_agg.append({"hour": f"{h}:00", "count": total})
-
-    return templates.TemplateResponse(
-        "manager/analytics.html",
-        _ctx(
-            request,
-            period=period,
-            kpis=kpis_obj,
-            top_agents=top_agents,
-            heatmap=heatmap,
-            heatmap_max=heatmap_max,
-            kb_gaps=kb_gaps,
-            analytics_json=analytics_json,
-            trend=trend,
-            peak_hours=peak_hours_agg,
-        ),
-    )
+async def manager_analytics(period: str = "month") -> RedirectResponse:
+    return RedirectResponse(url=f"/manager?period={period}", status_code=302)
 
 
 # ── GET /api/manager/analytics/kpis (partial refresh) ────────────────────────
@@ -723,11 +1110,11 @@ async def assign_department(
 ) -> HTMLResponse:
     """Iron Rule #4: ONLY Manager can assign an agent to a specialized department."""
     from app.models.user import User
-    from app.models.audit import AuditLog
 
     lang = getattr(request.state, "lang", "ar")
     actor = getattr(request.state, "user", {}) or {}
-    if actor.get("role") not in ("manager", "admin"):
+    actor_role = (actor.get("role") or "").strip().lower()
+    if actor_role not in ("manager", "admin"):
         raise HTTPException(403, detail=t("errors.permission_denied", lang=lang))
 
     try:
@@ -739,21 +1126,22 @@ async def assign_department(
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(404)
+    if user.role == "admin" and actor_role != "admin":
+        raise HTTPException(403, detail="Only admin can modify admin users")
 
     old_dept = str(user.department_id) if user.department_id else None
     new_dept = uuid.UUID(department_id) if department_id and department_id.strip() else None
     user.department_id = new_dept
     user.updated_at = datetime.now(tz=UTC)
 
-    db.add(AuditLog(
-        id=uuid.uuid4(),
+    from app.services.audit import log, AuditAction
+    await log(db, AuditAction.USER_DEPARTMENT_CHANGED,
         actor_id=uuid.UUID(actor.get("sub", "")),
-        action="user.department_changed",
-        target_type="user",
-        target_id=uid,
-        changes={"from": old_dept, "to": str(new_dept) if new_dept else None},
-    ))
-    await db.flush()
+        resource_type="users",
+        resource_id=uid,
+        new_value={"from": old_dept, "to": str(new_dept) if new_dept else None},
+    )
+    await db.commit()
 
     return HTMLResponse(f'<span class="text-xs text-green-600">✅</span>')
 
@@ -823,6 +1211,13 @@ async def create_department(
         portal_fields=[],
     )
     db.add(dept)
+    await db.flush()
+    from app.services.audit import log_from_request, AuditAction
+    await log_from_request(db, request, AuditAction.DEPARTMENT_CREATE,
+        resource_type="departments",
+        resource_id=dept.id,
+        new_value={"name_ar": name_ar, "code": code},
+    )
     await db.commit()
     return JSONResponse({"ok": True, "id": str(dept.id)})
 
@@ -845,11 +1240,19 @@ async def update_department(
         raise HTTPException(404)
 
     body = await request.json()
+    old_vals = {"name_ar": dept.name_ar, "name_en": dept.name_en, "code": dept.code}
     for field in ("name_ar", "name_en", "code"):
         val = body.get(field)
         if val is not None:
             setattr(dept, field, val.strip() if isinstance(val, str) else val)
     dept.updated_at = datetime.now(tz=UTC)
+    from app.services.audit import log_from_request, AuditAction
+    await log_from_request(db, request, AuditAction.DEPARTMENT_UPDATE,
+        resource_type="departments",
+        resource_id=did,
+        old_value=old_vals,
+        new_value={"name_ar": dept.name_ar, "name_en": dept.name_en, "code": dept.code},
+    )
     await db.commit()
     return JSONResponse({"ok": True})
 
@@ -871,8 +1274,15 @@ async def toggle_department(
     if not dept:
         raise HTTPException(404)
 
+    old_active = dept.is_active
     dept.is_active = not dept.is_active
     dept.updated_at = datetime.now(tz=UTC)
+    from app.services.audit import log_from_request, AuditAction
+    await log_from_request(db, request, AuditAction.DEPARTMENT_TOGGLE,
+        resource_type="departments",
+        resource_id=did,
+        new_value={"from": old_active, "to": dept.is_active},
+    )
     await db.commit()
     return JSONResponse({"ok": True, "is_active": dept.is_active})
 
@@ -901,6 +1311,170 @@ async def save_department_fields(
 
     dept.portal_fields = fields
     dept.updated_at = datetime.now(tz=UTC)
+    from app.services.audit import log_from_request, AuditAction
+    await log_from_request(db, request, AuditAction.DEPARTMENT_FIELDS_UPDATE,
+        resource_type="departments",
+        resource_id=did,
+        new_value={"portal_fields": fields},
+    )
+    await db.commit()
+    return JSONResponse({"ok": True})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KB CATEGORIES (قاعدة المعرفة — تصنيفات) — Manager with kb.edit
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/manager/kb-categories", response_class=HTMLResponse,
+            dependencies=[Depends(require_permission("kb.edit"))])
+async def manager_kb_categories(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    """List and manage KB categories (top-level: parent_id is None)."""
+    from app.models.category import Category
+    from app.models.knowledge import KnowledgeArticle
+    import json as _json
+
+    categories = list((await db.execute(
+        select(Category)
+        .where(Category.deleted_at.is_(None), Category.parent_id.is_(None))
+        .order_by(Category.sort_order, Category.name_ar)
+    )).scalars().all())
+
+    article_counts: dict[str, int] = {}
+    for c in categories:
+        cnt = await db.scalar(
+            select(func.count(KnowledgeArticle.id)).where(
+                KnowledgeArticle.category_id == c.id,
+                KnowledgeArticle.deleted_at.is_(None),
+            )
+        )
+        article_counts[str(c.id)] = cnt or 0
+
+    categories_json = _json.dumps([{
+        "id": str(c.id),
+        "name_ar": c.name_ar,
+        "name_en": c.name_en,
+        "description_ar": c.description_ar or "",
+        "description_en": c.description_en or "",
+        "sort_order": c.sort_order,
+        "is_active": c.is_active,
+        "article_count": article_counts.get(str(c.id), 0),
+    } for c in categories], ensure_ascii=False)
+
+    return templates.TemplateResponse(
+        "manager/kb_categories.html",
+        _ctx(request, categories_json=categories_json),
+    )
+
+
+@router.post("/api/manager/kb-categories",
+             dependencies=[Depends(require_permission("kb.edit"))])
+async def create_kb_category(
+    request: Request, db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    from app.models.category import Category
+
+    body = await request.json()
+    name_ar = (body.get("name_ar") or "").strip()
+    name_en = (body.get("name_en") or "").strip()
+    description_ar = (body.get("description_ar") or "").strip() or None
+    description_en = (body.get("description_en") or "").strip() or None
+    sort_order = body.get("sort_order")
+    if sort_order is not None and not isinstance(sort_order, int):
+        try:
+            sort_order = int(sort_order)
+        except (TypeError, ValueError):
+            sort_order = 0
+    else:
+        sort_order = sort_order if isinstance(sort_order, int) else 0
+
+    if not name_ar:
+        raise HTTPException(422, detail="Name (AR) required")
+
+    cat = Category(
+        id=uuid.uuid4(),
+        name_ar=name_ar,
+        name_en=name_en or name_ar,
+        description_ar=description_ar,
+        description_en=description_en,
+        parent_id=None,
+        sort_order=sort_order,
+        is_active=True,
+    )
+    db.add(cat)
+    await db.commit()
+    return JSONResponse({"ok": True, "id": str(cat.id)})
+
+
+@router.put("/api/manager/kb-categories/{category_id}",
+            dependencies=[Depends(require_permission("kb.edit"))])
+async def update_kb_category(
+    category_id: str, request: Request, db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    from app.models.category import Category
+
+    try:
+        cid = uuid.UUID(category_id)
+    except ValueError:
+        raise HTTPException(400)
+
+    result = await db.execute(
+        select(Category).where(Category.id == cid, Category.deleted_at.is_(None), Category.parent_id.is_(None))
+    )
+    cat = result.scalar_one_or_none()
+    if not cat:
+        raise HTTPException(404)
+
+    body = await request.json()
+    for field in ("name_ar", "name_en", "description_ar", "description_en", "sort_order", "is_active"):
+        val = body.get(field)
+        if val is None:
+            continue
+        if field == "sort_order":
+            try:
+                setattr(cat, field, int(val))
+            except (TypeError, ValueError):
+                pass
+        elif field == "is_active":
+            setattr(cat, field, bool(val))
+        elif isinstance(val, str):
+            setattr(cat, field, val.strip() if field not in ("description_ar", "description_en") else (val.strip() or None))
+    cat.updated_at = datetime.now(tz=UTC)
+    await db.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.delete("/api/manager/kb-categories/{category_id}",
+               dependencies=[Depends(require_permission("kb.edit"))])
+async def delete_kb_category(
+    category_id: str, request: Request, db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    from app.models.category import Category
+    from app.models.knowledge import KnowledgeArticle
+
+    try:
+        cid = uuid.UUID(category_id)
+    except ValueError:
+        raise HTTPException(400)
+
+    result = await db.execute(
+        select(Category).where(Category.id == cid, Category.deleted_at.is_(None), Category.parent_id.is_(None))
+    )
+    cat = result.scalar_one_or_none()
+    if not cat:
+        raise HTTPException(404)
+
+    # Unlink articles from this category (set category_id to null)
+    articles_result = await db.execute(
+        select(KnowledgeArticle).where(KnowledgeArticle.category_id == cid, KnowledgeArticle.deleted_at.is_(None))
+    )
+    for art in articles_result.scalars().all():
+        art.category_id = None
+        art.updated_at = datetime.now(tz=UTC)
+    cat.deleted_at = datetime.now(tz=UTC)
+    cat.updated_at = datetime.now(tz=UTC)
     await db.commit()
     return JSONResponse({"ok": True})
 
@@ -913,11 +1487,11 @@ async def assign_user_departments(
     """Assign a user to multiple departments."""
     from app.models.user import User
     from app.models.department import UserDepartment
-    from app.models.audit import AuditLog
 
     lang = getattr(request.state, "lang", "ar")
     actor = getattr(request.state, "user", {}) or {}
-    if actor.get("role") not in ("manager", "admin"):
+    actor_role = (actor.get("role") or "").strip().lower()
+    if actor_role not in ("manager", "admin"):
         raise HTTPException(403)
 
     try:
@@ -925,13 +1499,15 @@ async def assign_user_departments(
     except ValueError:
         raise HTTPException(400)
 
-    body = await request.json()
-    dept_ids = body.get("department_ids", [])
-
     result = await db.execute(select(User).where(User.id == uid, User.deleted_at.is_(None)))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(404)
+    if user.role == "admin" and actor_role != "admin":
+        raise HTTPException(403, detail="Only admin can modify admin users")
+
+    body = await request.json()
+    dept_ids = body.get("department_ids", [])
 
     # Clear existing assignments
     from sqlalchemy import delete
@@ -949,15 +1525,14 @@ async def assign_user_departments(
     user.department_id = uuid.UUID(dept_ids[0]) if dept_ids else None
     user.updated_at = datetime.now(tz=UTC)
 
-    db.add(AuditLog(
-        id=uuid.uuid4(),
+    from app.services.audit import log, AuditAction
+    await log(db, AuditAction.USER_DEPARTMENTS_CHANGED,
         actor_id=uuid.UUID(actor.get("sub", "")) if actor.get("sub") else None,
-        action="user.departments_changed",
-        target_type="user",
-        target_id=uid,
-        changes={"departments": dept_ids},
-    ))
-    await db.flush()
+        resource_type="users",
+        resource_id=uid,
+        new_value={"departments": dept_ids},
+    )
+    await db.commit()
 
     return HTMLResponse(f'<span class="text-xs text-green-600">✅</span>')
 
@@ -988,7 +1563,8 @@ async def create_user(
         raise HTTPException(422, detail="Invalid role")
 
     actor = getattr(request.state, "user", {}) or {}
-    if role == "admin" and actor.get("role") != "admin":
+    actor_role = (actor.get("role") or "").strip().lower()
+    if role == "admin" and actor_role != "admin":
         raise HTTPException(403, detail="Only admin can create admin users")
 
     existing = await db.execute(select(User).where(User.username == username, User.deleted_at.is_(None)))
@@ -1007,6 +1583,13 @@ async def create_user(
         password_hash=hash_password(password),
     )
     db.add(user_obj)
+    await db.flush()
+    from app.services.audit import log_from_request, AuditAction
+    await log_from_request(db, request, AuditAction.USER_CREATE,
+        resource_type="users",
+        resource_id=user_obj.id,
+        new_value={"username": username, "role": role, "full_name_ar": full_name_ar},
+    )
     await db.commit()
     return JSONResponse({"ok": True, "id": str(user_obj.id)}, status_code=201)
 
@@ -1029,16 +1612,29 @@ async def update_user(
         raise HTTPException(404)
 
     actor = getattr(request.state, "user", {}) or {}
-    if user.role == "admin" and actor.get("role") != "admin":
+    actor_role = (actor.get("role") or "").strip().lower()
+    if user.role == "admin" and actor_role != "admin":
         raise HTTPException(403, detail="Only admin can edit admin users")
 
     body = await request.json()
+    old_vals = {f: getattr(user, f) for f in ("full_name_ar", "full_name_en", "email", "phone", "employee_id")}
+    changes = {}
     for field in ("full_name_ar", "full_name_en", "email", "phone", "employee_id"):
         val = body.get(field)
         if val is not None:
-            setattr(user, field, val.strip() if isinstance(val, str) else val)
+            new_val = val.strip() if isinstance(val, str) else val
+            setattr(user, field, new_val)
+            if old_vals.get(field) != new_val:
+                changes[field] = {"from": old_vals.get(field), "to": new_val}
 
     user.updated_at = datetime.now(tz=UTC)
+    if changes:
+        from app.services.audit import log_from_request, AuditAction
+        await log_from_request(db, request, AuditAction.USER_UPDATE,
+            resource_type="users",
+            resource_id=uid,
+            new_value=changes,
+        )
     await db.commit()
     return JSONResponse({"ok": True})
 
@@ -1049,7 +1645,6 @@ async def change_user_role(
     user_id: str, request: Request, db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     from app.models.user import User
-    from app.models.audit import AuditLog
 
     try:
         uid = uuid.UUID(user_id)
@@ -1062,28 +1657,28 @@ async def change_user_role(
         raise HTTPException(422, detail="Invalid role")
 
     actor = getattr(request.state, "user", {}) or {}
+    actor_role = (actor.get("role") or "").strip().lower()
     result = await db.execute(select(User).where(User.id == uid, User.deleted_at.is_(None)))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(404)
 
-    if user.role == "admin" and actor.get("role") != "admin":
+    if user.role == "admin" and actor_role != "admin":
         raise HTTPException(403, detail="Only admin can change admin users")
-    if new_role == "admin" and actor.get("role") != "admin":
+    if new_role == "admin" and actor_role != "admin":
         raise HTTPException(403, detail="Only admin can promote to admin")
 
     old_role = user.role
     user.role = new_role
     user.updated_at = datetime.now(tz=UTC)
 
-    db.add(AuditLog(
-        id=uuid.uuid4(),
+    from app.services.audit import log, AuditAction
+    await log(db, AuditAction.USER_ROLE_CHANGED,
         actor_id=uuid.UUID(actor.get("sub", "")) if actor.get("sub") else None,
-        action="user.role_changed",
-        target_type="user",
-        target_id=uid,
-        changes={"from": old_role, "to": new_role},
-    ))
+        resource_type="users",
+        resource_id=uid,
+        new_value={"from": old_role, "to": new_role},
+    )
     await db.commit()
     return JSONResponse({"ok": True})
 
@@ -1106,11 +1701,19 @@ async def toggle_user_active(
         raise HTTPException(404)
 
     actor = getattr(request.state, "user", {}) or {}
-    if user.role == "admin" and actor.get("role") != "admin":
+    actor_role = (actor.get("role") or "").strip().lower()
+    if user.role == "admin" and actor_role != "admin":
         raise HTTPException(403, detail="Only admin can modify admin users")
 
+    old_active = user.is_active
     user.is_active = not user.is_active
     user.updated_at = datetime.now(tz=UTC)
+    from app.services.audit import log_from_request, AuditAction
+    await log_from_request(db, request, AuditAction.USER_TOGGLE_ACTIVE,
+        resource_type="users",
+        resource_id=uid,
+        new_value={"from": old_active, "to": user.is_active},
+    )
     await db.commit()
     return JSONResponse({"ok": True, "is_active": user.is_active})
 
@@ -1139,11 +1742,17 @@ async def reset_user_password(
         raise HTTPException(404)
 
     actor = getattr(request.state, "user", {}) or {}
-    if user.role == "admin" and actor.get("role") != "admin":
+    actor_role = (actor.get("role") or "").strip().lower()
+    if user.role == "admin" and actor_role != "admin":
         raise HTTPException(403, detail="Only admin can modify admin users")
 
     user.password_hash = hash_password(new_pass)
     user.updated_at = datetime.now(tz=UTC)
+    from app.services.audit import log_from_request, AuditAction
+    await log_from_request(db, request, AuditAction.USER_PASSWORD_RESET,
+        resource_type="users",
+        resource_id=uid,
+    )
     await db.commit()
     return JSONResponse({"ok": True})
 
@@ -1153,22 +1762,8 @@ async def reset_user_password(
 # ══════════════════════════════════════════════════════════════════════════════
 
 _ALL_ROLES = ["employee", "supervisor", "manager", "admin"]
-
-_DEFAULT_PERMISSIONS: dict[str, list[str]] = {
-    "dashboard.view":       ["employee", "supervisor", "manager", "admin"],
-    "tickets.view":         ["employee", "supervisor", "manager", "admin"],
-    "tickets.create":       ["employee", "supervisor", "manager", "admin"],
-    "tickets.edit":         ["employee", "supervisor", "manager", "admin"],
-    "tickets.delete":       ["manager", "admin"],
-    "supervisor.view":      ["supervisor", "manager", "admin"],
-    "supervisor.team":      ["supervisor", "manager", "admin"],
-    "manager.view":         ["manager", "admin"],
-    "manager.settings":     ["manager", "admin"],
-    "admin.view":           ["admin"],
-    "kb.view":              ["employee", "supervisor", "manager", "admin"],
-    "kb.edit":              ["supervisor", "manager", "admin"],
-    "reports.view":         ["supervisor", "manager", "admin"],
-}
+# Use single source of truth from core (enforcement uses same defaults + DB overrides)
+_DEFAULT_PERMISSIONS = DEFAULT_ROLE_PERMISSIONS
 
 _PERMISSION_GROUPS: dict[str, dict] = {
     "dashboard": {"label_ar": "لوحة التحكم",    "label_en": "Dashboard",      "perms": ["dashboard.view"]},
@@ -1247,39 +1842,68 @@ async def manager_permissions(
              dependencies=[Depends(require_permission("manager.settings"))])
 async def manager_toggle_permission(
     request: Request,
-    permission: str = Form(...),
-    role: str = Form(...),
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
+    import json as _json
     from app.models.permission import RolePermission
-    from app.core.permissions import invalidate_permission_cache
     from app.core.redis import get_redis_pool
 
-    result = await db.execute(
-        select(RolePermission).where(
-            RolePermission.role == role,
-            RolePermission.permission_key == permission,
-        )
-    )
-    rp = result.scalar_one_or_none()
-    if rp:
-        rp.is_granted = not rp.is_granted
+    # Accept both form (HTMX default) and JSON (e.g. when hx-vals is JSON)
+    content_type = (request.headers.get("content-type") or "").lower()
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON")
+        permission = (body.get("permission") or "").strip()
+        role = (body.get("role") or "").strip()
     else:
-        default_roles = _DEFAULT_PERMISSIONS.get(permission, [])
-        is_default = role in default_roles
-        rp = RolePermission(id=uuid.uuid4(), role=role, permission_key=permission, is_granted=not is_default)
-        db.add(rp)
+        form = await request.form()
+        permission = (form.get("permission") or "").strip()
+        role = (form.get("role") or "").strip()
 
-    await db.commit()
+    if not permission or not role:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="permission and role required")
 
-    redis = await get_redis_pool()
-    await invalidate_permission_cache(role, redis)
+    role = role.strip().lower()
+    permission = permission.strip()
+
+    try:
+        result = await db.execute(
+            select(RolePermission).where(
+                RolePermission.role == role,
+                RolePermission.permission_key == permission,
+            )
+        )
+        rp = result.scalar_one_or_none()
+        if rp:
+            rp.is_granted = not rp.is_granted
+        else:
+            default_roles = _DEFAULT_PERMISSIONS.get(permission, [])
+            is_default = role in default_roles
+            rp = RolePermission(id=uuid.uuid4(), role=role, permission_key=permission, is_granted=not is_default)
+            db.add(rp)
+
+        await db.commit()
+        await db.refresh(rp)
+
+        redis = await get_redis_pool()
+        await invalidate_all_permission_caches(redis)
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=t("errors.server_error", lang=getattr(request.state, "lang", "ar")),
+        ) from e
 
     checked = "checked" if rp.is_granted else ""
+    vals_json = _json.dumps({"permission": permission, "role": role})
+    # Attribute in single quotes so JSON double quotes are fine; escape only single quote
+    vals_attr = vals_json.replace("'", "&#39;")
     return HTMLResponse(
         f'<input type="checkbox" {checked} '
-        f'hx-post="/api/manager/permissions/toggle" '
-        f'hx-vals=\'{{"permission":"{permission}","role":"{role}"}}\' '
+        f"hx-post=\"/api/manager/permissions/toggle\" "
+        f"hx-vals='{vals_attr}' "
         f'hx-target="closest td" hx-swap="innerHTML" '
         f'class="h-4 w-4 rounded cursor-pointer" style="accent-color:#00AEEF;">'
     )
@@ -1293,17 +1917,17 @@ async def reset_role_permissions(
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     from app.models.permission import RolePermission
-    from app.core.permissions import invalidate_permission_cache
     from app.core.redis import get_redis_pool
     from sqlalchemy import delete
 
     lang = getattr(request.state, "lang", "ar")
+    role = (role or "").strip().lower()
 
     await db.execute(delete(RolePermission).where(RolePermission.role == role))
     await db.commit()
 
     redis = await get_redis_pool()
-    await invalidate_permission_cache(role, redis)
+    await invalidate_all_permission_caches(redis)
 
     msg = f"تم إعادة تعيين صلاحيات {role} للافتراضي" if lang == "ar" else f"Reset {role} permissions to default"
     return JSONResponse({"ok": True, "message": msg})
@@ -1318,19 +1942,25 @@ async def force_logout(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
-    """Terminate all active sessions for a user."""
+    """Terminate all active sessions for a user. Manager cannot force-logout admin."""
+    from app.models.user import User
     from app.models.user_session import UserSession
     from app.models.audit import AuditLog
 
     lang = getattr(request.state, "lang", "ar")
     actor = getattr(request.state, "user", {}) or {}
-    if actor.get("role") not in ("manager", "admin"):
+    actor_role = (actor.get("role") or "").strip().lower()
+    if actor_role not in ("manager", "admin"):
         raise HTTPException(403)
 
     try:
         uid = uuid.UUID(user_id)
     except ValueError:
         raise HTTPException(400)
+
+    target = (await db.execute(select(User).where(User.id == uid, User.deleted_at.is_(None)))).scalar_one_or_none()
+    if target and target.role == "admin" and actor_role != "admin":
+        raise HTTPException(403, detail="Only admin can force-logout admin users")
 
     now = datetime.now(tz=UTC)
     result = await db.execute(
@@ -1347,14 +1977,13 @@ async def force_logout(
     redis = await get_redis_pool()
     await redis.delete(f"session:{uid}")
 
-    db.add(AuditLog(
-        id=uuid.uuid4(),
+    from app.services.audit import log, AuditAction
+    await log(db, AuditAction.USER_FORCE_LOGOUT,
         actor_id=uuid.UUID(actor.get("sub", "")),
-        action="user.force_logout",
-        target_type="user",
-        target_id=uid,
-        changes={"sessions_revoked": len(sessions)},
-    ))
+        resource_type="users",
+        resource_id=uid,
+        new_value={"sessions_revoked": len(sessions)},
+    )
     await db.flush()
 
     return HTMLResponse(f'<span class="text-xs text-red-600">🔒 {len(sessions)} sessions terminated</span>')
@@ -1405,6 +2034,18 @@ async def cold_storage(
     return HTMLResponse(f'<table class="data-table"><thead><tr><th>#</th><th>Subject</th><th>Date</th></tr></thead><tbody>{rows}</tbody></table>')
 
 
+# ── Cron expression from frequency ───────────────────────────────────────────
+
+def _cron_for_frequency(frequency: str) -> str:
+    if frequency == "daily":
+        return "0 7 * * *"
+    if frequency == "weekly":
+        return "0 7 * * 0"
+    if frequency == "monthly":
+        return "0 7 1 * *"
+    return "0 7 * * 0"
+
+
 # ── POST /api/manager/scheduled-report ────────────────────────────────────
 
 @router.post("/api/manager/scheduled-report", response_class=HTMLResponse,
@@ -1413,42 +2054,253 @@ async def create_scheduled_report(
     request: Request,
     report_type: str = Form(...),
     frequency: str = Form("weekly"),
+    format: str = Form("pdf"),
+    language: str = Form("ar"),
     recipients: str = Form(...),
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
-    """Create a scheduled report with any valid email recipients."""
+    """Create a scheduled report; each report has its own recipient list."""
     from app.models.report import ScheduledReport
-    from app.models.audit import AuditLog
+    from app.services.reports import REPORT_TYPES
 
     lang = getattr(request.state, "lang", "ar")
     actor = getattr(request.state, "user", {}) or {}
 
-    email_list = [e.strip() for e in recipients.split(",") if "@" in e.strip()]
+    if format not in ("pdf", "xlsx"):
+        format = "pdf"
+    if language not in ("ar", "en"):
+        language = "ar"
+
+    email_list = [e.strip() for e in recipients.replace("\n", ",").split(",") if e.strip() and "@" in e.strip()]
     if not email_list:
         raise HTTPException(422, detail="At least one valid email required")
 
+    names = REPORT_TYPES.get(report_type, {"name_ar": report_type, "name_en": report_type})
+    name_ar = names.get("name_ar", report_type)
+    name_en = names.get("name_en", report_type)
+
     report = ScheduledReport(
         id=uuid.uuid4(),
-        name=f"{report_type}_{frequency}",
-        report_type=report_type,
+        name_ar=name_ar,
+        name_en=name_en,
+        report_config={"report_type": report_type, "options": {}},
         frequency=frequency,
+        cron_expr=_cron_for_frequency(frequency),
         recipients=email_list,
-        created_by=uuid.UUID(actor.get("sub", "")),
+        format=format,
+        language=language,
         is_active=True,
+        created_by=uuid.UUID(actor.get("sub", "")) if actor.get("sub") else None,
     )
     db.add(report)
 
-    db.add(AuditLog(
-        id=uuid.uuid4(),
-        actor_id=uuid.UUID(actor.get("sub", "")),
-        action="report.scheduled",
-        target_type="scheduled_report",
-        target_id=report.id,
-        changes={"type": report_type, "frequency": frequency, "recipients": email_list},
-    ))
-    await db.flush()
+    from app.services.audit import log, AuditAction
+    await log(db, AuditAction.REPORT_SCHEDULED,
+        actor_id=uuid.UUID(actor.get("sub", "")) if actor.get("sub") else None,
+        resource_type="scheduled_reports",
+        resource_id=report.id,
+        new_value={"report_type": report_type, "frequency": frequency, "recipients": email_list},
+    )
+    await db.commit()
 
-    return HTMLResponse(f'<p class="text-sm text-green-600">✅ {"تم الجدولة" if lang == "ar" else "Scheduled"}</p>')
+    # Return success message; table refreshes via HX-Trigger
+    return HTMLResponse(
+        f'<p class="text-sm text-green-600" id="report-result">✅ {t("mgr.scheduled_report_created", lang=lang)}</p>',
+        headers={"HX-Trigger": "refreshScheduledReports"},
+    )
+
+
+# ── GET /api/manager/reports/export ───────────────────────────────────────────
+
+@router.get("/api/manager/reports/export",
+            dependencies=[Depends(require_permission("manager.view"))])
+async def export_report(
+    request: Request,
+    report_type: str = "kpi_summary",
+    period: str = "month",
+    format: str = "pdf",
+    lang: str = "ar",
+    db: AsyncSession = Depends(get_db),
+    redis=Depends(get_redis),
+) -> StreamingResponse:
+    """Export report as PDF or XLSX; same page download (Content-Disposition: attachment)."""
+    from app.services.reports import (
+        REPORT_TYPES,
+        gather_report_data,
+        build_report_pdf,
+        build_report_xlsx,
+    )
+
+    if report_type not in REPORT_TYPES and report_type != "kpi_summary":
+        report_type = "kpi_summary"
+    if period not in ("today", "week", "month"):
+        period = "month"
+    if format not in ("pdf", "xlsx"):
+        format = "pdf"
+    if lang not in ("ar", "en"):
+        lang = getattr(request.state, "lang", "ar")
+
+    data = await gather_report_data(db, report_type, period, redis)
+    names = REPORT_TYPES.get(report_type, {"name_ar": "report", "name_en": "report"})
+    safe_name = (names.get("name_en") or report_type).replace(" ", "_").lower()
+    date_suffix = datetime.now(tz=UTC).strftime("%Y-%m-%d")
+
+    if format == "pdf":
+        body = build_report_pdf(data, report_type, lang)
+        if not isinstance(body, bytes):
+            body = body.encode("utf-8") if isinstance(body, str) else bytes(body)
+        return Response(
+            content=body,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{safe_name}_{date_suffix}.pdf"',
+                "Content-Length": str(len(body)),
+                "Content-Type": "application/pdf",
+            },
+        )
+    body = build_report_xlsx(data, report_type, lang)
+    return StreamingResponse(
+        iter([body]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}_{date_suffix}.xlsx"',
+            "Content-Length": str(len(body)),
+        },
+    )
+
+
+def _scheduled_reports_table_html(reports: list, lang: str) -> str:
+    """Build the scheduled reports table HTML (shared by GET list and PATCH response)."""
+    rows = []
+    for r in reports:
+        name = r.name_ar if lang == "ar" and r.name_ar else (r.name_en or r.name_ar or str(r.id))
+        recips = ", ".join((r.recipients or [])[:3])
+        if (r.recipients or []) and len(r.recipients) > 3:
+            recips += "…"
+        last = r.last_sent_at.strftime("%Y-%m-%d %H:%M") if r.last_sent_at else "—"
+        toggle_link = (
+            f'<a href="#" class="text-xs text-amber-600 hover:underline" hx-patch="/api/manager/scheduled-reports/{r.id}" '
+            f'hx-vals=\'{{"is_active": "false"}}\' hx-target="#scheduled-reports-table" hx-swap="outerHTML" '
+            f'hx-trigger="click" hx-push-url="false">'
+            f'{t("mgr.deactivate", lang=lang)}</a>'
+            if r.is_active
+            else
+            f'<a href="#" class="text-xs text-green-600 hover:underline" hx-patch="/api/manager/scheduled-reports/{r.id}" '
+            f'hx-vals=\'{{"is_active": "true"}}\' hx-target="#scheduled-reports-table" hx-swap="outerHTML" '
+            f'hx-trigger="click" hx-push-url="false">'
+            f'{t("mgr.activate", lang=lang)}</a>'
+        )
+        rows.append(
+            f'<tr data-report-id="{r.id}">'
+            f'<td class="text-sm">{name}</td>'
+            f'<td class="text-xs">{r.report_config.get("report_type", "") if isinstance(r.report_config, dict) else ""}</td>'
+            f'<td class="text-xs">{r.frequency}</td>'
+            f'<td class="text-xs">{r.format}</td>'
+            f'<td class="text-xs" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">{recips}</td>'
+            f'<td class="text-xs">{last}</td>'
+            f'<td>{toggle_link}</td>'
+            f'<td><button type="button" class="text-red-600 hover:underline report-delete" data-id="{r.id}" '
+            f'hx-delete="/api/manager/scheduled-reports/{r.id}" hx-target="closest tr" hx-swap="outerHTML swap:1s">'
+            f'{t("app.delete", lang=lang)}</button></td>'
+            f"</tr>"
+        )
+    if not rows:
+        rows.append(
+            f'<tr><td colspan="8" class="text-center py-6 text-sm" style="color:var(--text-faint);">'
+            f'{t("mgr.no_scheduled_reports", lang=lang)}</td></tr>'
+        )
+
+    table_html = (
+        '<table class="w-full border-collapse text-start" id="scheduled-reports-table">'
+        "<thead><tr>"
+        f'<th class="text-xs font-semibold p-2 border-b">{t("mgr.report_name", lang=lang)}</th>'
+        f'<th class="text-xs font-semibold p-2 border-b">{t("mgr.report_type", lang=lang)}</th>'
+        f'<th class="text-xs font-semibold p-2 border-b">{t("mgr.frequency", lang=lang)}</th>'
+        f'<th class="text-xs font-semibold p-2 border-b">{t("mgr.report_format", lang=lang)}</th>'
+        f'<th class="text-xs font-semibold p-2 border-b">{t("mgr.report_recipients", lang=lang)}</th>'
+        f'<th class="text-xs font-semibold p-2 border-b">{t("mgr.last_sent", lang=lang)}</th>'
+        f'<th class="text-xs font-semibold p-2 border-b">{t("mgr.active", lang=lang)}</th>'
+        f'<th class="text-xs font-semibold p-2 border-b"></th>'
+        "</tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
+    )
+    return table_html
+
+
+@router.get("/api/manager/scheduled-reports", response_class=HTMLResponse,
+            dependencies=[Depends(require_permission("manager.view"))])
+async def list_scheduled_reports(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    """Return HTML fragment of scheduled reports table for same-page display."""
+    from app.models.report import ScheduledReport
+
+    lang = getattr(request.state, "lang", "ar")
+    result = await db.execute(
+        select(ScheduledReport).order_by(ScheduledReport.created_at.desc())
+    )
+    reports = list(result.scalars().all())
+    return HTMLResponse(_scheduled_reports_table_html(reports, lang))
+
+
+# ── PATCH /api/manager/scheduled-reports/{id} ────────────────────────────────
+
+@router.patch("/api/manager/scheduled-reports/{report_id}", response_class=HTMLResponse,
+              dependencies=[Depends(require_permission("manager.view"))])
+async def update_scheduled_report(
+    request: Request,
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    """Toggle is_active (same page). Accepts JSON or form body."""
+    from app.models.report import ScheduledReport
+
+    is_active = None
+    if request.headers.get("content-type", "").startswith("application/json"):
+        try:
+            body = await request.json()
+            is_active = body.get("is_active")
+        except Exception:
+            pass
+    else:
+        form = await request.form()
+        is_active = form.get("is_active")
+
+    result = await db.execute(select(ScheduledReport).where(ScheduledReport.id == report_id))
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(404, detail="Report not found")
+    if is_active is not None:
+        report.is_active = str(is_active).lower() in ("true", "1", "on", "yes")
+    await db.commit()
+    # Return updated table so HTMX can replace #scheduled-reports-table
+    result = await db.execute(
+        select(ScheduledReport).order_by(ScheduledReport.created_at.desc())
+    )
+    reports = list(result.scalars().all())
+    lang = getattr(request.state, "lang", "ar")
+    return HTMLResponse(_scheduled_reports_table_html(reports, lang))
+
+
+# ── DELETE /api/manager/scheduled-reports/{id} (soft) ────────────────────────
+
+@router.delete("/api/manager/scheduled-reports/{report_id}", response_class=HTMLResponse,
+               dependencies=[Depends(require_permission("manager.view"))])
+async def delete_scheduled_report(
+    request: Request,
+    report_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    """Soft-delete scheduled report; return empty so row can be removed."""
+    from app.models.report import ScheduledReport
+
+    result = await db.execute(select(ScheduledReport).where(ScheduledReport.id == report_id))
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(404, detail="Report not found")
+    await db.delete(report)
+    await db.commit()
+    return HTMLResponse("")
 
 
 # ── Form Builder API ────────────────────────────────────────────────────────

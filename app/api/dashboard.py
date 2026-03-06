@@ -159,22 +159,39 @@ async def queue_specialized(
     agent_id: Optional[str] = None, dept_id: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
+    from app.services.queue import _get_user_dept_ids
+
     user = getattr(request.state, "user", {}) or {}
+    user_id = _parse_user_id(user)
     user_dept = _parse_dept_id(user)
     role = user.get("role", "employee")
     lang = getattr(request.state, "lang", "ar")
+    filter_dept_uuid = _parse_filter_uuid(dept_id)
 
-    if not user_dept and role not in ("supervisor", "manager", "admin"):
+    if role == "employee":
+        user_dept_ids = await _get_user_dept_ids(db, user_id) if user_id else []
+        if filter_dept_uuid and filter_dept_uuid not in user_dept_ids:
+            return HTMLResponse(
+                f'<tr><td colspan="10" class="text-center text-xs py-4" '
+                f'style="color:var(--text-muted);">{t("dash.empty_queue", lang=lang)}</td></tr>'
+            )
+        if not user_dept_ids and not filter_dept_uuid:
+            return HTMLResponse(
+                f'<tr><td colspan="10" class="text-center text-xs py-4" '
+                f'style="color:var(--text-muted);">{t("dash.empty_queue", lang=lang)}</td></tr>'
+            )
+        user_dept = user_dept or (filter_dept_uuid if filter_dept_uuid in user_dept_ids else None)
+    elif not user_dept and role not in ("supervisor", "manager", "admin"):
         return HTMLResponse(
             f'<tr><td colspan="10" class="text-center text-xs py-4" '
             f'style="color:var(--text-muted);">{t("dash.empty_queue", lang=lang)}</td></tr>'
         )
 
     queue = await get_smart_queue(
-        db, user_id=_parse_user_id(user), role=role, dept_id=user_dept,
+        db, user_id=user_id, role=role, dept_id=user_dept,
         page=page, queue_filter="specialized",
         filter_agent_id=_parse_filter_uuid(agent_id),
-        filter_dept_id=_parse_filter_uuid(dept_id),
+        filter_dept_id=filter_dept_uuid,
     )
     return templates.TemplateResponse("dashboard/_queue_rows.html", _queue_ctx(request, queue))
 
@@ -542,6 +559,14 @@ async def log_call(
         )
         log.ticket_id = ticket.id
         created_ticket_number = ticket.ticket_number
+
+    if created_ticket_number and ticket:
+        from app.services.audit import log_from_request, AuditAction
+        await log_from_request(
+            db, request, AuditAction.TICKET_CREATE,
+            resource_type="tickets", resource_id=ticket.id,
+            new_value={"ticket_number": created_ticket_number, "source": "call_log", "outcome": outcome},
+        )
 
     await db.commit()
     return JSONResponse({"ok": True, "id": str(log.id),

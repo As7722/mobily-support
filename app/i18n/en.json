@@ -219,7 +219,8 @@
     "take_ownership": "Take Ownership",
     "assign_to": "Assign To",
     "return_to_agent": "Return to Agent",
-    "escalate_to_manager": "Escalate to Manager"
+    "escalate_to_manager": "Escalate to Manager",
+    "department_queue": "Queue {name}"
   },
   "csat": {
     "title": "Service Satisfaction Survey",
@@ -612,6 +613,8 @@
     "tab_gamification": "Gamification",
     "tab_audit": "Audit Log",
     "tab_reports": "Scheduled Reports",
+    "tab_notifications": "Notifications",
+    "tab_call_reasons": "Call Reasons",
     "form_field_add": "Add Field",
     "form_field_type": "Field Type",
     "automation_if": "IF",
@@ -631,7 +634,17 @@
     "dept_assign_desc": "Assign agent to specialized department",
     "kb_gaps_title": "KB Gaps Report",
     "kb_gaps_desc": "Categories with high ticket volume but no KB articles",
-    "scheduled_report_created": "Scheduled report created"
+    "scheduled_report_created": "Scheduled report created",
+    "report_name": "Report name",
+    "report_type": "Report type",
+    "frequency": "Frequency",
+    "last_sent": "Last sent",
+    "active": "Active",
+    "no_scheduled_reports": "No scheduled reports",
+    "activate": "Activate",
+    "deactivate": "Deactivate",
+    "export_now": "Export now",
+    "schedule_new": "Schedule new report"
   },
   "user": {
     "full_name_ar": "Full Name (Arabic)",

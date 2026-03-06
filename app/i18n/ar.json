@@ -219,7 +219,8 @@
     "take_ownership": "أخذ الملكية",
     "assign_to": "إسناد إلى",
     "return_to_agent": "إعادة للموظف",
-    "escalate_to_manager": "تصعيد للمدير"
+    "escalate_to_manager": "تصعيد للمدير",
+    "department_queue": "طابور {name}"
   },
   "csat": {
     "title": "تقييم الخدمة",
@@ -612,6 +613,8 @@
     "tab_gamification": "التحفيز والمكافآت",
     "tab_audit": "سجل التدقيق",
     "tab_reports": "التقارير المجدولة",
+    "tab_notifications": "الإشعارات",
+    "tab_call_reasons": "أسباب المكالمات",
     "form_field_add": "إضافة حقل",
     "form_field_type": "نوع الحقل",
     "automation_if": "إذا",
@@ -631,7 +634,17 @@
     "dept_assign_desc": "تعيين موظف لقسم متخصص",
     "kb_gaps_title": "تقرير فجوات قاعدة المعرفة",
     "kb_gaps_desc": "تصنيفات بتذاكر كثيرة بدون مقالات في قاعدة المعرفة",
-    "scheduled_report_created": "تم إنشاء التقرير المجدول"
+    "scheduled_report_created": "تم إنشاء التقرير المجدول",
+    "report_name": "اسم التقرير",
+    "report_type": "نوع التقرير",
+    "frequency": "التكرار",
+    "last_sent": "آخر إرسال",
+    "active": "مفعّل",
+    "no_scheduled_reports": "لا توجد تقارير مجدولة",
+    "activate": "تفعيل",
+    "deactivate": "إيقاف",
+    "export_now": "تصدير الآن",
+    "schedule_new": "جدولة تقرير جديد"
   },
   "user": {
     "full_name_ar": "الاسم بالعربية",

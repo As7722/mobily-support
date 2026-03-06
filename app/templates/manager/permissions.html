@@ -3,7 +3,10 @@
 {% block page_title %}{{ lang == 'ar' and 'إدارة الصلاحيات' or 'Permissions Management' }}{% endblock %}
 
 {% block content %}
-<div class="p-6 space-y-6 fade-in" x-data="permManager()" x-init="init()">
+<div class="p-4 pb-6">
+  {% set hub_tab = 'permissions' %}
+  {% include 'manager/_tabs_nav.html' %}
+  <div class="p-6 space-y-6 fade-in" x-data="permManager()" x-init="init()">
 
   <!-- Header -->
   <div class="flex items-center justify-between">
@@ -123,6 +126,7 @@
     </div>
   </template>
 
+</div>
 </div>
 
 <script>

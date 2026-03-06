@@ -10,7 +10,10 @@
 } %}
 
 {% block content %}
-<div class="p-6 space-y-5 fade-in" x-data="userMgr()">
+<div class="p-4 pb-6">
+  {% set hub_tab = 'users' %}
+  {% include 'manager/_tabs_nav.html' %}
+  <div class="p-6 space-y-5 fade-in" x-data="userMgr()">
 
   <!-- Header -->
   <div class="flex items-center justify-between">
@@ -180,6 +183,18 @@
 </div>
 
 <script>
+function getCsrfToken() {
+  var m = document.cookie.match(/csrf_token=([^;]+)/);
+  return m ? decodeURIComponent(m[1].trim()) : '';
+}
+function fetchOpts(method, body) {
+  var opts = { method: method, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' } };
+  var csrf = getCsrfToken();
+  if (csrf) opts.headers['X-CSRF-Token'] = csrf;
+  if (body !== undefined) opts.body = typeof body === 'string' ? body : JSON.stringify(body);
+  return opts;
+}
+
 window._currentRole = '{{ current_role }}';
 window._usersData = [
   {% for user in users %}
@@ -248,47 +263,68 @@ function userMgr() {
       if (!self.editing && (!self.form.password || self.form.password.length < 8)) { self.formError = '{{ lang == "ar" and "كلمة المرور مطلوبة (8 أحرف على الأقل)" or "Password required (min 8 characters)" }}'; return; }
       self.saving = true; self.formError = '';
       var url = self.editing ? '/api/manager/users/' + self.editing.id : '/api/manager/users';
-      fetch(url, { method: self.editing ? 'PUT' : 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(self.form) })
-        .then(function(r) { return r.json(); })
+      var method = self.editing ? 'PUT' : 'POST';
+      fetch(url, fetchOpts(method, self.form))
+        .then(function(r) {
+          if (!r.ok && r.headers.get('content-type') && r.headers.get('content-type').indexOf('application/json') === -1) return { ok: false, detail: r.status === 403 ? '{{ lang == "ar" and "تم رفض الطلب (تحقق من الجلسة)" or "Request denied (check session)" }}' : 'Error ' + r.status };
+          return r.json();
+        })
         .then(function(d) {
-          if (d.ok) { self.showModal = false; location.reload(); }
-          else { self.formError = d.detail || 'Error'; }
+          if (!d || !d.ok) {
+            self.formError = (d && d.detail) ? (typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail)) : '{{ lang == "ar" and "فشل الحفظ" or "Save failed" }}';
+            self.saving = false;
+            return;
+          }
+          var roleChanged = self.editing && self.form.role !== self.editing.role;
+          if (roleChanged) {
+            return fetch('/api/manager/users/' + self.editing.id + '/change-role', fetchOpts('POST', { role: self.form.role }))
+              .then(function(r2) { return r2.json(); })
+              .then(function(d2) {
+                if (d2 && d2.ok) { self.showModal = false; location.reload(); }
+                else { self.formError = (d2 && d2.detail) || '{{ lang == "ar" and "فشل تحديث الدور" or "Role update failed" }}'; }
+                self.saving = false;
+              });
+          }
+          self.showModal = false;
+          location.reload();
           self.saving = false;
-        }).catch(function() { self.saving = false; self.formError = 'Error'; });
+        })
+        .catch(function(e) { self.saving = false; self.formError = '{{ lang == "ar" and "فشل الحفظ" or "Save failed" }}'; });
     },
 
     changeRole(uid, newRole) {
-      if (!confirm('{{ lang == "ar" and "هل تريد تغيير دور هذا المستخدم؟" or "Change this user role?" }}')) { location.reload(); return; }
-      fetch('/api/manager/users/' + uid + '/change-role', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({role: newRole}) })
+      if (!confirm('{{ lang == "ar" and "هل تريد تغيير دور هذا المستخدم؟" or "Change this user role?" }}')) return;
+      fetch('/api/manager/users/' + uid + '/change-role', fetchOpts('POST', { role: newRole }))
         .then(function(r) { return r.json(); })
-        .then(function(d) { if (d.ok) { var u = window._usersData.find(function(x){return x.id===uid;}); if(u) u.role=newRole; } });
+        .then(function(d) { if (d && d.ok) { var u = window._usersData.find(function(x){return x.id===uid;}); if(u) u.role=newRole; location.reload(); } });
     },
 
     toggleActive(u) {
-      fetch('/api/manager/users/' + u.id + '/toggle-active', { method: 'POST' })
+      fetch('/api/manager/users/' + u.id + '/toggle-active', fetchOpts('POST'))
         .then(function(r) { return r.json(); })
-        .then(function(d) { if (d.ok) u.is_active = d.is_active; });
+        .then(function(d) { if (d && d.ok) { u.is_active = d.is_active; } });
     },
 
     toggleUserDept(u, deptId, checked) {
       if (checked && !u.dept_ids.includes(deptId)) u.dept_ids.push(deptId);
       if (!checked) u.dept_ids = u.dept_ids.filter(function(d){return d!==deptId;});
-      fetch('/api/manager/users/' + u.id + '/departments', { method: 'PATCH', headers: {'Content-Type':'application/json'}, body: JSON.stringify({department_ids: u.dept_ids}) });
+      fetch('/api/manager/users/' + u.id + '/departments', fetchOpts('PATCH', { department_ids: u.dept_ids }));
     },
 
     resetPassword(uid) {
       var p = prompt('{{ lang == "ar" and "أدخل كلمة المرور الجديدة (8 أحرف على الأقل):" or "Enter new password (min 8 characters):" }}', '');
       if (!p || p.length < 8) return;
-      fetch('/api/manager/users/' + uid + '/reset-password', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({password: p}) })
+      fetch('/api/manager/users/' + uid + '/reset-password', fetchOpts('POST', { password: p }))
         .then(function(r) { return r.json(); })
-        .then(function(d) { if (d.ok) alert('{{ lang == "ar" and "تم تغيير كلمة المرور" or "Password changed" }}'); else if (d.detail) alert(d.detail); });
+        .then(function(d) { if (d && d.ok) alert('{{ lang == "ar" and "تم تغيير كلمة المرور" or "Password changed" }}'); else if (d && d.detail) alert(typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail)); });
     },
 
     forceLogout(uid) {
       if (!confirm('{{ lang == "ar" and "إنهاء جميع جلسات هذا المستخدم؟" or "Terminate all sessions?" }}')) return;
-      fetch('/api/manager/users/' + uid + '/force-logout', { method: 'POST' });
+      fetch('/api/manager/users/' + uid + '/force-logout', fetchOpts('POST'));
     },
   };
 }
 </script>
+</div>
 {% endblock %}

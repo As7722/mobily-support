@@ -4,6 +4,7 @@ Separate from app/api/portal.py which handles public-facing ticket endpoints.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -32,6 +33,7 @@ from app.services.ticket_service import (
 from app.services.timeline import EventType, add_event, get_public_timeline
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 UTC = timezone.utc
 
 
@@ -123,15 +125,15 @@ async def tickets_list(
     queue: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
+    from app.models.department import Department, UserDepartment
+
     user = getattr(request.state, "user", {}) or {}
     role = user.get("role", "employee")
-    dept_id_str = user.get("department_id")
-    has_department = bool(dept_id_str)
-
     departments = []
     agents_list = []
+    my_departments: list = []
+
     if role in ("supervisor", "manager", "admin"):
-        from app.models.department import Department
         dept_r = await db.execute(
             select(Department).where(Department.is_active.is_(True), Department.deleted_at.is_(None))
             .order_by(Department.name_ar)
@@ -143,6 +145,26 @@ async def tickets_list(
             .order_by(User.full_name_ar).limit(200)
         )
         agents_list = list(ag_r.scalars().all())
+    else:
+        # Employee: load departments assigned via user_departments (many-to-many)
+        try:
+            user_id = uuid.UUID(user.get("sub", "")) if user.get("sub") else None
+        except (ValueError, TypeError):
+            user_id = None
+        if user_id:
+            dept_r = await db.execute(
+                select(Department)
+                .join(UserDepartment, UserDepartment.department_id == Department.id)
+                .where(
+                    UserDepartment.user_id == user_id,
+                    Department.is_active.is_(True),
+                    Department.deleted_at.is_(None),
+                )
+                .order_by(Department.name_ar)
+            )
+            my_departments = list(dept_r.scalars().all())
+
+    has_department = (len(my_departments) > 0) if role == "employee" else (len(departments) > 0)
 
     return templates.TemplateResponse(
         "tickets/list.html",
@@ -152,6 +174,7 @@ async def tickets_list(
             has_department=has_department,
             active_queue=queue or "mine",
             departments=departments,
+            my_departments=my_departments,
             agents_list=agents_list,
         ),
     )
@@ -375,19 +398,31 @@ async def reply(
         actor_type="agent",
         is_public=not internal,
     )
+    from app.services.audit import log_from_request, AuditAction
+    await log_from_request(
+        db, request, AuditAction.TICKET_COMMENT,
+        resource_type="tickets", resource_id=tid,
+        new_value={
+            "ticket_number": ticket.ticket_number,
+            "source": "internal" if internal else "external",
+            "content_length": len((content or "").strip()),
+            "has_attachment": bool(attachment and attachment.filename),
+        },
+    )
     ticket.updated_at = datetime.now(tz=UTC)
     ticket.version += 1
 
-    # Handle optional file attachment (store locally for dev; swap for S3 in prod)
+    # Handle optional file attachment (store locally; path from settings for Windows/Docker)
     if attachment and attachment.filename:
         import os, aiofiles
         from app.models.ticket_timeline import TicketAttachment
-        upload_dir = "/app/uploads/tickets"
+        from app.core.config import settings
+        upload_dir = settings.ticket_uploads_path
         os.makedirs(upload_dir, exist_ok=True)
         import re as _re
         clean_filename = _re.sub(r'[^\w\-.]', '_', os.path.basename(attachment.filename or "file"))
         safe_name = f"{uuid.uuid4().hex}_{clean_filename}"
-        file_path = os.path.join(upload_dir, safe_name)
+        file_path = os.path.join(str(upload_dir), safe_name)
         file_bytes = await attachment.read()
         async with aiofiles.open(file_path, "wb") as f:
             await f.write(file_bytes)
@@ -405,6 +440,10 @@ async def reply(
             uploaded_by=agent_id,
         )
         db.add(att)
+        logger.info(
+            "ticket_attachment_created",
+            extra={"ticket_id": str(tid), "att_id": str(att.id), "s3_key": att.s3_key},
+        )
 
     await db.flush()
 
@@ -454,9 +493,15 @@ async def change_status(
         raise HTTPException(409, detail=t("ticket_detail.version_conflict", lang=lang))
 
     try:
-        await change_ticket_status(db, ticket, status, agent_id, reason=reason, lang=lang)
+        await change_ticket_status(
+            db, ticket, status, agent_id,
+            reason=reason, lang=lang,
+            actor_role=user.get("role"),
+        )
     except ValueError as exc:
         raise HTTPException(422, detail=str(exc))
+
+    await db.commit()
 
     r = Response(status_code=200)
     r.headers["HX-Redirect"] = f"/tickets/{ticket_id}"
@@ -501,6 +546,13 @@ async def transfer(
     )
     await db.flush()
 
+    from app.services.audit import log_from_request, AuditAction
+    await log_from_request(
+        db, request, AuditAction.TICKET_ASSIGN,
+        resource_type="tickets", resource_id=tid,
+        new_value={"ticket_number": ticket.ticket_number, "assigned_to": str(new_agent), "reason": reason},
+    )
+
     # Notify new assignee
     try:
         from app.services.notifications import create_notification, NotifEvent
@@ -538,11 +590,20 @@ async def update_priority(
 
     ticket = await _get_ticket_and_check_access(db, tid, request)
     try:
+        old_priority = ticket.priority
         await change_ticket_priority(db, ticket, priority, actor_id, role)
     except PermissionError:
         raise HTTPException(403, detail=t("errors.permission_denied", lang=lang))
     except ValueError as exc:
         raise HTTPException(422, detail=str(exc))
+    else:
+        from app.services.audit import log_from_request, AuditAction
+        await log_from_request(
+            db, request, AuditAction.TICKET_UPDATE,
+            resource_type="tickets", resource_id=tid,
+            old_value={"priority": old_priority},
+            new_value={"priority": priority, "ticket_number": ticket.ticket_number},
+        )
 
     r = Response(status_code=200)
     r.headers["HX-Redirect"] = f"/tickets/{ticket_id}"
@@ -599,6 +660,12 @@ async def escalate(
         content_en=f"Escalated to {target_queue} — {reason}",
         actor_id=acting, actor_type="agent", is_public=True,
         metadata={"reason": reason, "target_queue": target_queue},
+    )
+    from app.services.audit import log_from_request, AuditAction
+    await log_from_request(
+        db, request, AuditAction.TICKET_ESCALATE,
+        resource_type="tickets", resource_id=tid,
+        new_value={"ticket_number": ticket.ticket_number, "target_queue": target_queue, "reason": reason},
     )
     await db.flush()
 
@@ -723,6 +790,12 @@ async def return_ticket(
         content_en=f"{desc_en} — {reason or ''}",
         actor_id=acting, actor_type="agent", is_public=False,
         metadata=metadata_extra,
+    )
+    from app.services.audit import log_from_request, AuditAction
+    await log_from_request(
+        db, request, AuditAction.TICKET_ASSIGN,
+        resource_type="tickets", resource_id=tid,
+        new_value={"ticket_number": ticket.ticket_number, "target": target, "reason": reason, **metadata_extra},
     )
     await db.flush()
 
@@ -870,16 +943,58 @@ async def download_attachment(
     if not att:
         raise HTTPException(404)
 
-    # Local storage path
-    if att.s3_key and att.s3_key.startswith("local/"):
-        file_path = f"/app/uploads/tickets/{att.s3_key[6:]}"
-        import os
-        if os.path.exists(file_path):
+    # Local storage: resolve key (support "local/xxx" and legacy plain key)
+    import os
+    from app.core.config import settings, BASE_DIR
+
+    if not att.s3_key or not att.s3_key.strip():
+        raise HTTPException(404, "File not available")
+
+    raw_key = att.s3_key.replace("\\", "/").strip()
+    if raw_key.startswith("local/"):
+        key_suffix = raw_key[6:].lstrip("/")
+    else:
+        key_suffix = raw_key.lstrip("/")
+
+    if not key_suffix:
+        raise HTTPException(404, "File not available")
+
+    def _try_path(path: str):
+        if path and os.path.exists(path):
             return FileResponse(
-                file_path,
+                path,
                 media_type=att.mime_type or "application/octet-stream",
                 filename=att.file_name,
             )
+        return None
+
+    # 1) Current config path (project uploads/tickets or TICKET_UPLOADS_DIR)
+    r = _try_path(str(settings.ticket_uploads_path / key_suffix))
+    if r is not None:
+        return r
+    # 2) Default BASE_DIR/uploads/tickets (in case env points elsewhere)
+    r = _try_path(str(BASE_DIR / "uploads" / "tickets" / key_suffix))
+    if r is not None:
+        return r
+    # 3) Legacy path for old tickets (e.g. /app/uploads/tickets on Docker)
+    legacy_path = os.path.join("/app", "uploads", "tickets", key_suffix)
+    r = _try_path(legacy_path)
+    if r is not None:
+        return r
+
+    logger.warning(
+        "ticket_attachment_file_not_found",
+        extra={
+            "ticket_id": str(tid),
+            "att_id": str(att_uuid),
+            "s3_key": att.s3_key,
+            "tried_paths": [
+                str(settings.ticket_uploads_path / key_suffix),
+                str(BASE_DIR / "uploads" / "tickets" / key_suffix),
+                legacy_path,
+            ],
+        },
+    )
     raise HTTPException(404, "File not available")
 
 
@@ -948,7 +1063,6 @@ async def merge_tickets(
         raise HTTPException(400, "Cannot merge a ticket into itself")
 
     from app.models.ticket_timeline import TicketTimeline
-    from app.models.audit import AuditLog
 
     parent_q = await db.execute(
         select(Ticket).where(Ticket.id == p_id, Ticket.deleted_at.is_(None))
@@ -1021,13 +1135,12 @@ async def merge_tickets(
         is_public=False,
     ))
 
-    db.add(AuditLog(
-        actor_id=actor_id,
-        action="merge",
-        resource_type="tickets",
-        resource_id=p_id,
+    from app.services.audit import log_from_request, AuditAction
+    await log_from_request(
+        db, request, AuditAction.TICKET_MERGE,
+        resource_type="tickets", resource_id=p_id,
         new_value={"merged_tickets": merged_numbers, "reason": reason},
-    ))
+    )
     await db.flush()
 
     return JSONResponse({"ok": True, "parent_id": str(p_id), "merged_count": len(merged_numbers)})
@@ -1066,7 +1179,6 @@ async def split_ticket(
     from app.services.ticket import generate_ticket_number
     from app.services.sla import calculate_sla_deadline
     from app.models.ticket_timeline import TicketTimeline
-    from app.models.audit import AuditLog
     import secrets
 
     now = datetime.now(tz=UTC)
@@ -1122,13 +1234,12 @@ async def split_ticket(
         is_public=False,
     ))
 
-    db.add(AuditLog(
-        actor_id=actor_id,
-        action="split",
-        resource_type="tickets",
-        resource_id=parent_id,
+    from app.services.audit import log_from_request, AuditAction
+    await log_from_request(
+        db, request, AuditAction.TICKET_SPLIT,
+        resource_type="tickets", resource_id=parent_id,
         new_value={"child_ticket": ticket_num, "reason": reason},
-    ))
+    )
     await db.flush()
 
     return JSONResponse({

@@ -1,0 +1,20 @@
+{# شريط التابات الرئيسي للمشرف - يظهر في كل الصفحات (لوحة المشرف | الفريق | التذاكر) #}
+{% set _hub_tab = hub_tab|default('overview') %}
+<nav class="flex items-center gap-1 mb-6 overflow-x-auto pb-2" style="border-bottom: 1px solid var(--border-color);">
+  {% for tab_id, label_ar, label_en in [
+    ('overview', 'لوحة المشرف', 'Supervisor Dashboard'),
+    ('team', 'الفريق', 'Team'),
+    ('tickets', 'التذاكر', 'Tickets'),
+  ] %}
+  <a href="{% if tab_id == 'overview' %}/supervisor{% else %}/supervisor/{{ tab_id }}{% endif %}"
+     class="px-4 py-2.5 rounded-t-lg text-sm font-semibold whitespace-nowrap transition-all duration-150
+            {% if _hub_tab == tab_id %}
+              text-white bg-[#00AEEF] border border-b-0 border-[#00AEEF]
+            {% else %}
+              text-[var(--text-muted)] hover:bg-[var(--bg-surface)] hover:text-[var(--text-ink)] border border-transparent
+            {% endif %}"
+     style="margin-bottom: -1px;">
+    {{ label_ar if lang == 'ar' else label_en }}
+  </a>
+  {% endfor %}
+</nav>

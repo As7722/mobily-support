@@ -4,7 +4,10 @@
 {% block page_title %}{{ t('supervisor.tickets', lang=lang) }}{% endblock %}
 
 {% block content %}
-<div class="space-y-4 p-4" x-data="{ selected: [], bulkAgent: '' }">
+<div class="p-4 pb-6">
+  {% set hub_tab = 'tickets' %}
+  {% include 'supervisor/_tabs_nav.html' %}
+<div class="space-y-4" x-data="{ selected: [], bulkAgent: '' }">
 
   {# ── Filters ─────────────────────────────────────────────────────────────── #}
   <form method="get" action="/supervisor/tickets" class="card p-4 flex flex-wrap gap-3 items-end">
@@ -173,6 +176,7 @@
     {% endif %}
   </div>
 
+</div>
 </div>
 <script>
   window._ticketIds = {{ ticket_ids | tojson }};

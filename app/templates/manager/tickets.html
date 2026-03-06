@@ -4,7 +4,10 @@
 {% block page_title %}{{ t('manager.all_tickets', lang=lang) }}{% endblock %}
 
 {% block content %}
-<div class="space-y-4 p-4" x-data="{ selected: [] }">
+<div class="p-4 pb-6">
+  {% set hub_tab = 'tickets' %}
+  {% include 'manager/_tabs_nav.html' %}
+<div class="space-y-4" x-data="{ selected: [] }">
 
   {# ── Filters ─────────────────────────────────────────────────────────────── #}
   <form method="get" action="/manager/tickets" class="card p-4 flex flex-wrap gap-3 items-end">
@@ -174,5 +177,6 @@
     {% endif %}
   </div>
 
+</div>
 </div>
 {% endblock %}

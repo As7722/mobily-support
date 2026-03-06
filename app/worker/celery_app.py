@@ -66,11 +66,10 @@ celery_app.conf.update(
             "schedule": crontab(day_of_month=1, hour=0, minute=10),
             "options": {"queue": "reports"},
         },
-        # Scheduled reports — weekly on Sunday 07:00
-        "weekly-report": {
-            "task": "reports.generate_scheduled",
-            "schedule": crontab(day_of_week="sunday", hour=7, minute=0),
-            "kwargs": {"period": "weekly"},
+        # Scheduled reports — every day at 07:00; task enqueues each due report (daily/weekly/monthly)
+        "run-scheduled-reports-due": {
+            "task": "reports.run_scheduled_due",
+            "schedule": crontab(hour=7, minute=0),
             "options": {"queue": "reports"},
         },
         # System health snapshot — every 5 minutes

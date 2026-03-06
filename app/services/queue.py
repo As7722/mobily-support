@@ -185,6 +185,15 @@ async def claim_ticket(
         actor_type="agent",
         is_public=False,
     )
+    from app.services.audit import log, AuditAction
+    await log(
+        db,
+        AuditAction.TICKET_ASSIGN,
+        actor_id=agent_id,
+        resource_type="tickets",
+        resource_id=ticket.id,
+        new_value={"ticket_number": ticket.ticket_number, "assigned_to": str(agent_id), "source": "queue_claim"},
+    )
     await db.flush()
     return ticket
 
@@ -260,6 +269,15 @@ async def auto_balance(
             actor_id=supervisor_id,
             actor_type="agent",
             is_public=False,
+        )
+        from app.services.audit import log, AuditAction
+        await log(
+            db,
+            AuditAction.TICKET_ASSIGN,
+            actor_id=supervisor_id,
+            resource_type="tickets",
+            resource_id=ticket.id,
+            new_value={"ticket_number": ticket.ticket_number, "assigned_to": str(agent.id), "source": "auto_balance"},
         )
         count += 1
 

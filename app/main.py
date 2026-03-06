@@ -17,6 +17,7 @@ from app.core.database import engine
 from app.core.redis import close_redis_pool, get_redis_pool
 from app.middleware.auth import AuthMiddleware
 from app.middleware.language import LanguageMiddleware
+from app.middleware.permissions import PermissionsMiddleware
 from app.middleware.theme import ThemeMiddleware
 
 # Import all models so SQLAlchemy registers them in Base.metadata
@@ -82,11 +83,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── Custom Middleware (order matters — outermost runs first) ─────────────────
-# Auth must run before Language so user.preferred_language is available
+# ─── Custom Middleware (order matters) ───────────────────────────────────────
+# In Starlette: LAST added = runs FIRST on request (LIFO). We need Auth before Permissions.
+# So add Permissions first, then Auth last → Auth runs first, sets user, then Permissions runs.
 app.add_middleware(LanguageMiddleware)
-app.add_middleware(AuthMiddleware)
 app.add_middleware(ThemeMiddleware)
+app.add_middleware(PermissionsMiddleware)
+app.add_middleware(AuthMiddleware)
 
 
 # ─── Global Exception Handlers ───────────────────────────────────────────────

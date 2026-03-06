@@ -1,0 +1,27 @@
+{# شريط التابات الرئيسي للمدير - يظهر في كل الصفحات للتنقل بين التابات #}
+{% set _hub_tab = hub_tab|default('overview') %}
+<nav class="flex items-center gap-1 mb-6 overflow-x-auto pb-2" style="border-bottom: 1px solid var(--border-color);">
+  {% for tab_id, label_ar, label_en in [
+    ('overview', 'نظرة عامة', 'Overview'),
+    ('tickets', 'التذاكر', 'Tickets'),
+    ('users', 'المستخدمون', 'Users'),
+    ('departments', 'الأقسام', 'Departments'),
+    ('kb_categories', 'تصنيفات قاعدة المعرفة', 'KB Categories'),
+    ('permissions', 'الصلاحيات', 'Permissions'),
+    ('settings', 'الإعدادات', 'Settings'),
+    ('audit', 'سجل التدقيق', 'Audit Log'),
+    ('scheduled_reports', 'التقارير المجدولة', 'Scheduled Reports'),
+    ('call_logs', 'سجلات المكالمات', 'Call Logs'),
+  ] %}
+  <a href="{% if tab_id == 'overview' %}/manager{% elif tab_id == 'audit' %}/manager/settings?tab=audit{% elif tab_id == 'scheduled_reports' %}/manager/settings?tab=reports{% else %}/manager/{{ 'call-logs' if tab_id == 'call_logs' else ('kb-categories' if tab_id == 'kb_categories' else tab_id) }}{% endif %}"
+     class="px-4 py-2.5 rounded-t-lg text-sm font-semibold whitespace-nowrap transition-all duration-150
+            {% if _hub_tab == tab_id %}
+              text-white bg-[#00AEEF] border border-b-0 border-[#00AEEF]
+            {% else %}
+              text-[var(--text-muted)] hover:bg-[var(--bg-surface)] hover:text-[var(--text-ink)] border border-transparent
+            {% endif %}"
+     style="margin-bottom: -1px;">
+    {{ label_ar if lang == 'ar' else label_en }}
+  </a>
+  {% endfor %}
+</nav>

@@ -26,7 +26,7 @@
   <script defer src="https://unpkg.com/alpinejs@3.14.1/dist/cdn.min.js"></script>
 
   <!-- Active Seasonal Theme CSS override -->
-  {% set _theme_css = request.state.theme_css if request.state is defined and request.state.theme_css is defined else '' %}
+  {% set _theme_css = get_theme_css(request) %}
   {% if _theme_css %}<style>{{ _theme_css | safe }}</style>{% endif %}
 
   <!-- CSS Variables in plain style so browsers process them directly -->
@@ -185,6 +185,17 @@
     .scale-in      { animation: scaleIn 0.2s cubic-bezier(0.34,1.56,0.64,1) both; }
     .slide-in-end  { animation: slideInEnd 0.22s ease-out both; }
     .delay-1 { animation-delay: 0.06s; } .delay-2 { animation-delay: 0.12s; } .delay-3 { animation-delay: 0.18s; } .delay-4 { animation-delay: 0.24s; }
+    /* HTMX loading: global bar + indicators */
+    .htmx-indicator { opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+    .htmx-request .htmx-indicator { opacity: 1; }
+    #htmx-loading-bar { position: fixed; top: 0; inset-inline-start: 0; width: 100%; height: 3px; background: var(--cyan); transform: scaleX(0); transform-origin: 0 0; z-index: 9999; transition: transform 0.15s ease-out; }
+    body.htmx-loading #htmx-loading-bar { animation: htmx-bar 1.2s ease-in-out infinite; transform: scaleX(0.4); }
+    @keyframes htmx-bar { 0% { transform: scaleX(0.1); } 50% { transform: scaleX(0.6); } 100% { transform: scaleX(0.1); } }
+    /* Empty state for tables/lists */
+    .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; padding: 2.5rem 1rem; text-align: center; color: var(--text-muted); font-size: 0.875rem; }
+    .empty-state-icon { display: flex; align-items: center; justify-content: center; width: 3rem; height: 3rem; border-radius: 1rem; background: var(--bg-muted); color: var(--text-faint); }
+    .app-main-sidebar { padding-inline-start: 72px; }
+    @media (max-width: 767px) { .app-main-sidebar { padding-inline-start: 0; } }
   </style>
 
   <!-- Tailwind utilities only - @apply based classes that need the Tailwind compiler -->
@@ -255,7 +266,7 @@
   {% block navbar %}{% endblock %}
 
   {# ── Seasonal Theme Banner ────────────────────────────────────────────── #}
-  {% set _at = request.state.active_theme if request.state is defined and request.state.active_theme is defined else none %}
+  {% set _at = get_active_theme(request) %}
   {% if _at %}
   <div id="theme-banner" style="position:fixed;top:0;left:0;right:0;z-index:9999;
        padding:6px 20px;text-align:center;font-size:13px;font-weight:700;letter-spacing:0.02em;
@@ -344,6 +355,13 @@
     });
   </script>
 
+  <!-- Global HTMX loading bar -->
+  <div id="htmx-loading-bar" aria-hidden="true"></div>
+  <script>
+    document.body.addEventListener('htmx:beforeRequest', function(){ document.body.classList.add('htmx-loading'); });
+    document.body.addEventListener('htmx:afterRequest', function(){ document.body.classList.remove('htmx-loading'); });
+    document.body.addEventListener('htmx:sendError', function(){ document.body.classList.remove('htmx-loading'); });
+  </script>
   {% block extra_scripts %}{% endblock %}
 </body>
 </html>

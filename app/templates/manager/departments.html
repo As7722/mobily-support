@@ -35,7 +35,10 @@
 } %}
 
 {% block content %}
-<div class="p-6 space-y-6 fade-in" x-data="deptManager()" x-init="init()">
+<div class="p-4 pb-6">
+  {% set hub_tab = 'departments' %}
+  {% include 'manager/_tabs_nav.html' %}
+  <div class="p-6 space-y-6 fade-in" x-data="deptManager()" x-init="init()">
 
   <div class="flex items-center justify-between">
     <div>
@@ -185,6 +188,7 @@
       </div>
     </div>
   </div>
+</div>
 </div>
 
 <script>

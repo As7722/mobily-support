@@ -110,6 +110,13 @@ async def login(
 
     # Constant-time failure to prevent username enumeration
     if not user or not verify_password(body.password, user.password_hash):
+        from app.services.audit import log, AuditAction
+        await log(db, AuditAction.LOGIN_FAILED,
+            actor_ip=request.client.host if request.client else None,
+            resource_type="auth",
+            new_value={"username": body.username},
+        )
+        await db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=t("auth.invalid_credentials", lang=lang),
@@ -153,6 +160,10 @@ async def login(
     await redis.setex(_jti_redis_key(access_payload["jti"]), _ACCESS_TTL, "1")
     await redis.setex(_jti_redis_key(refresh_payload["jti"]), _REFRESH_TTL, "1")
 
+    # Idle timeout: log out after N min of inactivity
+    idle_ttl = settings.JWT_IDLE_TIMEOUT_MINUTES * 60
+    await redis.setex(f"idle:{access_payload['jti']}", idle_ttl, "1")
+
     # Persist session record
     session = UserSession(
         user_id=user.id,
@@ -166,6 +177,16 @@ async def login(
     # Update online status
     user.is_online = True
     user.last_seen_at = datetime.now(timezone.utc)
+
+    from app.services.audit import log, AuditAction
+    await log(db, AuditAction.LOGIN,
+        actor_id=user.id,
+        actor_ip=request.client.host if request.client else None,
+        actor_role=user.role,
+        resource_type="users",
+        resource_id=user.id,
+        new_value={"username": user.username},
+    )
     await db.commit()
 
     # Set HttpOnly cookie
@@ -194,10 +215,26 @@ async def logout(
 ) -> Response:
     user_payload = getattr(request.state, "user", None)
     if user_payload:
-        # Revoke access token JTI
+        # Revoke access token JTI and idle key
         jti = user_payload.get("jti")
         if jti:
             await redis.delete(_jti_redis_key(jti))
+            await redis.delete(f"idle:{jti}")
+
+        # Audit logout
+        from app.services.audit import log, AuditAction
+        import uuid as _uuid
+        try:
+            uid = _uuid.UUID(user_payload.get("sub", ""))
+            await log(db, AuditAction.LOGOUT,
+                actor_id=uid,
+                actor_ip=request.client.host if request.client else None,
+                actor_role=user_payload.get("role"),
+                resource_type="users",
+                resource_id=uid,
+            )
+        except (ValueError, TypeError):
+            pass
 
         # Mark session invalid in DB
         user_id = user_payload.get("sub")

@@ -82,13 +82,14 @@
 {% block content %}
 {% set user = request.state.user if request.state.user else {} %}
 {% set user_role = user.get('role', 'employee') %}
-{% set has_department = user.get('department_id') %}
 {% set is_sup = user_role in ('supervisor', 'manager', 'admin') %}
+{# has_department and my_departments come from backend (tickets_list) #}
 
 <div id="tkt-root" class="tkt-page p-5 space-y-3"
      x-init="$nextTick(() => reloadQueue())"
      x-data="{
        activeQueue: '{{ active_queue }}',
+       activeDeptId: '',
        selected: [],
        selectAll: false,
        bulkModal: null,
@@ -114,7 +115,8 @@
          let u = '/api/tickets/queues/' + this.activeQueue;
          const params = [];
          if (this.filterAgent) params.push('agent_id=' + this.filterAgent);
-         if (this.filterDept) params.push('dept_id=' + this.filterDept);
+         if (this.activeQueue === 'specialized' && this.activeDeptId) params.push('dept_id=' + this.activeDeptId);
+         else if (this.filterDept) params.push('dept_id=' + this.filterDept);
          if (params.length) u += '?' + params.join('&');
          return u;
        },
@@ -154,38 +156,45 @@
 
   <!-- ═══ Queue Tabs ═════════════════════════════════════ -->
   <div class="tkt-tabs">
-    <button @click="activeQueue='mine'; $nextTick(() => reloadQueue())"
+    <button @click="activeQueue='mine'; activeDeptId=''; $nextTick(() => reloadQueue())"
             :class="activeQueue==='mine' ? 'active' : ''" class="tkt-tab">
       <span class="tab-dot" style="background:#3B82F6;"></span>
       {{ lang == 'ar' and 'تذاكري' or 'My Tickets' }}
     </button>
-    <button @click="activeQueue='main'; $nextTick(() => reloadQueue())"
+    <button @click="activeQueue='main'; activeDeptId=''; $nextTick(() => reloadQueue())"
             :class="activeQueue==='main' ? 'active' : ''" class="tkt-tab">
       <span class="tab-dot" style="background:#10B981;"></span>
       {{ lang == 'ar' and 'الطابور العام' or 'Main Queue' }}
     </button>
-    {% if has_department %}
-    <button @click="activeQueue='specialized'; $nextTick(() => reloadQueue())"
-            :class="activeQueue==='specialized' ? 'active' : ''" class="tkt-tab">
+    {% for dept in my_departments %}
+    <button @click="activeQueue='specialized'; activeDeptId='{{ dept.id }}'; $nextTick(() => reloadQueue())"
+            :class="activeQueue==='specialized' && activeDeptId==='{{ dept.id }}' ? 'active' : ''" class="tkt-tab">
+      <span class="tab-dot" style="background:#F59E0B;"></span>
+      {{ t('queue.department_queue', lang=lang, name=dept.name_ar if lang == 'ar' else (dept.name_en or dept.name_ar)) }}
+    </button>
+    {% endfor %}
+    {% if has_department and is_sup %}
+    <button @click="activeQueue='specialized'; activeDeptId=''; $nextTick(() => reloadQueue())"
+            :class="activeQueue==='specialized' && !activeDeptId ? 'active' : ''" class="tkt-tab">
       <span class="tab-dot" style="background:#F59E0B;"></span>
       {{ lang == 'ar' and 'القسم المختص' or 'Specialized' }}
     </button>
     {% endif %}
     {% if is_sup %}
-    <button @click="activeQueue='supervisor'; $nextTick(() => reloadQueue())"
+    <button @click="activeQueue='supervisor'; activeDeptId=''; $nextTick(() => reloadQueue())"
             :class="activeQueue==='supervisor' ? 'active' : ''" class="tkt-tab">
       <span class="tab-dot" style="background:#EF4444;"></span>
       {{ lang == 'ar' and 'المشرفين' or 'Supervisor' }}
     </button>
     {% endif %}
     {% if user_role in ('manager', 'admin') %}
-    <button @click="activeQueue='manager'; $nextTick(() => reloadQueue())"
+    <button @click="activeQueue='manager'; activeDeptId=''; $nextTick(() => reloadQueue())"
             :class="activeQueue==='manager' ? 'active' : ''" class="tkt-tab">
       <span class="tab-dot" style="background:#8B5CF6;"></span>
       {{ lang == 'ar' and 'المدراء' or 'Manager' }}
     </button>
     {% endif %}
-    <button @click="activeQueue='internal_tickets'; $nextTick(() => reloadQueue())"
+    <button @click="activeQueue='internal_tickets'; activeDeptId=''; $nextTick(() => reloadQueue())"
             :class="activeQueue==='internal_tickets' ? 'active' : ''" class="tkt-tab"
             style="position:relative;">
       <span class="tab-dot" style="background:#F59E0B;"></span>

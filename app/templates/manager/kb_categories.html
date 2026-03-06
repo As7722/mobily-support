@@ -1,0 +1,211 @@
+{% extends "base_app.html" %}
+{% block title %}{{ lang == 'ar' and 'تصنيفات قاعدة المعرفة' or 'KB Categories' }} — موبايلي{% endblock %}
+{% block page_title %}{{ lang == 'ar' and 'تصنيفات قاعدة المعرفة' or 'KB Categories' }}{% endblock %}
+
+{% set _lbl = {
+  'title': lang == 'ar' and 'تصنيفات قاعدة المعرفة' or 'KB Categories',
+  'desc': lang == 'ar' and 'إضافة وتعديل وحذف التصنيفات المستخدمة في قاعدة المعرفة' or 'Add, edit and delete categories used in the knowledge base',
+  'add': lang == 'ar' and 'إضافة تصنيف' or 'Add Category',
+  'edit': lang == 'ar' and 'تعديل' or 'Edit',
+  'delete': lang == 'ar' and 'حذف' or 'Delete',
+  'name_ar': lang == 'ar' and 'الاسم (عربي)' or 'Name (AR)',
+  'name_en': lang == 'ar' and 'الاسم (إنجليزي)' or 'Name (EN)',
+  'description_ar': lang == 'ar' and 'الوصف (عربي)' or 'Description (AR)',
+  'description_en': lang == 'ar' and 'الوصف (إنجليزي)' or 'Description (EN)',
+  'sort_order': lang == 'ar' and 'ترتيب العرض' or 'Sort order',
+  'active': lang == 'ar' and 'نشط' or 'Active',
+  'inactive': lang == 'ar' and 'متوقف' or 'Inactive',
+  'articles': lang == 'ar' and 'مقالة' or 'articles',
+  'save': lang == 'ar' and 'حفظ' or 'Save',
+  'cancel': lang == 'ar' and 'إلغاء' or 'Cancel',
+  'confirm_delete': lang == 'ar' and 'هل تريد حذف هذا التصنيف؟ ستُزال مقالات هذا التصنيف من التصنيف (بدون حذف المقالات).' or 'Delete this category? Articles in this category will be unassigned (articles are not deleted).',
+} %}
+
+{% block content %}
+<div class="p-4 pb-6">
+  {% set hub_tab = 'kb_categories' %}
+  {% include 'manager/_tabs_nav.html' %}
+  <div class="p-6 space-y-6 fade-in" x-data="kbCategoriesManager()" x-init="init()">
+
+    <div class="flex items-center justify-between">
+      <div>
+        <h2 class="text-lg font-bold" style="color:var(--text-ink);">{{ _lbl.title }}</h2>
+        <p class="text-xs mt-0.5" style="color:var(--text-faint);">{{ _lbl.desc }}</p>
+      </div>
+      <button @click="openAdd()" class="btn-primary btn-sm" style="display:inline-flex;align-items:center;gap:5px;">
+        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+        {{ _lbl.add }}
+      </button>
+    </div>
+
+    <!-- Categories list -->
+    <div class="rounded-xl border overflow-hidden" style="border-color:var(--border-color);">
+      <table class="w-full text-sm">
+        <thead style="background:var(--bg-surface);border-bottom:1px solid var(--border-color);">
+          <tr>
+            <th class="text-right py-3 px-4 font-semibold" style="color:var(--text-muted);">{{ _lbl.name_ar }}</th>
+            <th class="text-right py-3 px-4 font-semibold" style="color:var(--text-muted);">{{ _lbl.name_en }}</th>
+            <th class="text-right py-3 px-4 font-semibold" style="color:var(--text-muted);">{{ _lbl.sort_order }}</th>
+            <th class="text-right py-3 px-4 font-semibold" style="color:var(--text-muted);">{{ _lbl.articles }}</th>
+            <th class="text-right py-3 px-4 font-semibold" style="color:var(--text-muted);">{{ lang == 'ar' and 'الحالة' or 'Status' }}</th>
+            <th class="text-right py-3 px-4 font-semibold w-24" style="color:var(--text-muted);">{{ lang == 'ar' and 'إجراءات' or 'Actions' }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="cat in categories" :key="cat.id">
+            <tr class="border-b border-t-0 border-x-0" style="border-color:var(--border-color);">
+              <td class="py-3 px-4" style="color:var(--text-ink);" x-text="cat.name_ar"></td>
+              <td class="py-3 px-4" style="color:var(--text-muted);" x-text="cat.name_en"></td>
+              <td class="py-3 px-4" style="color:var(--text-muted);" x-text="cat.sort_order"></td>
+              <td class="py-3 px-4" style="color:var(--text-muted);" x-text="cat.article_count"></td>
+              <td class="py-3 px-4">
+                <span class="shrink-0" style="padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;"
+                      :style="cat.is_active ? 'background:rgba(16,185,129,0.1);color:#10B981;' : 'background:rgba(239,68,68,0.1);color:#EF4444;'"
+                      x-text="cat.is_active ? '{{ _lbl.active }}' : '{{ _lbl.inactive }}'"></span>
+              </td>
+              <td class="py-3 px-4">
+                <div class="flex items-center gap-1 justify-end">
+                  <button @click="openEdit(cat)" class="btn-ghost btn-sm" style="padding:5px;" title="{{ _lbl.edit }}">
+                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z"/></svg>
+                  </button>
+                  <button @click="confirmDelete(cat)" class="btn-ghost btn-sm" style="padding:5px;color:#EF4444;" title="{{ _lbl.delete }}">
+                    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+      <div x-show="!categories || categories.length === 0" class="py-12 text-center text-sm" style="color:var(--text-faint);">
+        {{ lang == 'ar' and 'لا توجد تصنيفات. أضف تصنيفاً جديداً.' or 'No categories. Add a new category.' }}
+      </div>
+    </div>
+
+    <!-- Add/Edit Modal -->
+    <div x-show="showModal" x-transition class="modal-overlay" style="z-index:200;">
+      <div class="modal-box" style="max-width:500px;" @click.outside="showModal=false">
+        <div style="padding:20px 24px;border-bottom:1px solid var(--border-color);display:flex;align-items:center;justify-content:space-between;">
+          <h2 class="text-base font-bold" style="color:var(--text-ink);" x-text="editing ? '{{ _lbl.edit }}' : '{{ _lbl.add }}'"></h2>
+          <button @click="showModal=false" class="btn-ghost btn-sm" style="padding:6px;"><svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button>
+        </div>
+        <div style="padding:20px 24px;" class="space-y-4">
+          <div><label class="form-label">{{ _lbl.name_ar }} *</label><input type="text" x-model="form.name_ar" class="form-input"></div>
+          <div><label class="form-label">{{ _lbl.name_en }}</label><input type="text" x-model="form.name_en" class="form-input"></div>
+          <div><label class="form-label">{{ _lbl.description_ar }}</label><textarea x-model="form.description_ar" class="form-input text-sm" rows="2"></textarea></div>
+          <div><label class="form-label">{{ _lbl.description_en }}</label><textarea x-model="form.description_en" class="form-input text-sm" rows="2"></textarea></div>
+          <div><label class="form-label">{{ _lbl.sort_order }}</label><input type="number" x-model.number="form.sort_order" class="form-input" min="0"></div>
+          <div class="flex items-center gap-2">
+            <input type="checkbox" x-model="form.is_active" id="cat_active" style="accent-color:#00AEEF;">
+            <label for="cat_active" class="text-sm" style="color:var(--text-ink);">{{ _lbl.active }}</label>
+          </div>
+          <div x-show="formError" class="text-xs text-red-600" x-text="formError"></div>
+        </div>
+        <div style="padding:16px 24px;border-top:1px solid var(--border-color);display:flex;gap:8px;justify-content:flex-end;">
+          <button @click="showModal=false" class="btn-secondary btn-sm">{{ _lbl.cancel }}</button>
+          <button @click="saveCat()" :disabled="saving" class="btn-primary btn-sm">
+            <span x-text="editing ? '{{ _lbl.save }}' : '{{ _lbl.add }}'"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Delete confirmation -->
+    <div x-show="showDeleteModal" x-transition class="modal-overlay" style="z-index:210;">
+      <div class="modal-box" style="max-width:420px;" @click.outside="showDeleteModal=false">
+        <div style="padding:20px 24px;">
+          <p class="text-sm" style="color:var(--text-ink);" x-text="deleteTarget ? ('{{ _lbl.confirm_delete }} — ' + deleteTarget.name_ar) : ''"></p>
+        </div>
+        <div style="padding:16px 24px;border-top:1px solid var(--border-color);display:flex;gap:8px;justify-content:flex-end;">
+          <button @click="showDeleteModal=false" class="btn-secondary btn-sm">{{ _lbl.cancel }}</button>
+          <button @click="doDelete()" :disabled="saving" class="btn-sm" style="background:#EF4444;color:white;">{{ _lbl.delete }}</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+window._kbCategoriesData = {{ categories_json | safe }};
+function kbCategoriesManager() {
+  return {
+    categories: [],
+    showModal: false,
+    showDeleteModal: false,
+    deleteTarget: null,
+    editing: null,
+    form: { name_ar: '', name_en: '', description_ar: '', description_en: '', sort_order: 0, is_active: true },
+    formError: '',
+    saving: false,
+
+    init() { this.categories = window._kbCategoriesData || []; },
+
+    openAdd() {
+      this.editing = null;
+      this.form = { name_ar: '', name_en: '', description_ar: '', description_en: '', sort_order: 0, is_active: true };
+      this.formError = '';
+      this.showModal = true;
+    },
+
+    openEdit(c) {
+      this.editing = c;
+      this.form = {
+        name_ar: c.name_ar,
+        name_en: c.name_en || '',
+        description_ar: c.description_ar || '',
+        description_en: c.description_en || '',
+        sort_order: c.sort_order !== undefined ? c.sort_order : 0,
+        is_active: c.is_active !== false
+      };
+      this.formError = '';
+      this.showModal = true;
+    },
+
+    saveCat() {
+      var self = this;
+      if (!self.form.name_ar || !self.form.name_ar.trim()) {
+        self.formError = '{{ lang == "ar" and "الاسم (عربي) مطلوب" or "Name (AR) is required" }}';
+        return;
+      }
+      self.saving = true;
+      self.formError = '';
+      var url = self.editing ? ('/api/manager/kb-categories/' + self.editing.id) : '/api/manager/kb-categories';
+      var payload = {
+        name_ar: self.form.name_ar.trim(),
+        name_en: (self.form.name_en || '').trim() || self.form.name_ar.trim(),
+        description_ar: (self.form.description_ar || '').trim() || null,
+        description_en: (self.form.description_en || '').trim() || null,
+        sort_order: parseInt(self.form.sort_order, 10) || 0,
+        is_active: self.form.is_active
+      };
+      fetch(url, { method: self.editing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (d.ok) { self.showModal = false; location.reload(); }
+          else { self.formError = (d.detail && (typeof d.detail === 'string' ? d.detail : d.detail.msg || JSON.stringify(d.detail))) || 'Error'; }
+          self.saving = false;
+        })
+        .catch(function() { self.saving = false; self.formError = 'Error'; });
+    },
+
+    confirmDelete(cat) {
+      this.deleteTarget = cat;
+      this.showDeleteModal = true;
+    },
+
+    doDelete() {
+      var self = this;
+      if (!self.deleteTarget) return;
+      self.saving = true;
+      fetch('/api/manager/kb-categories/' + self.deleteTarget.id, { method: 'DELETE' })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (d.ok) { self.showDeleteModal = false; self.deleteTarget = null; location.reload(); }
+          self.saving = false;
+        })
+        .catch(function() { self.saving = false; });
+    }
+  };
+}
+</script>
+{% endblock %}

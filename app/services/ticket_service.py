@@ -59,6 +59,7 @@ async def change_ticket_status(
     *,
     reason: Optional[str] = None,
     lang: str = "ar",
+    actor_role: Optional[str] = None,
 ) -> None:
     """
     Transition ticket to new_status with automated time tracking.
@@ -116,6 +117,19 @@ async def change_ticket_status(
         actor_type="agent",
         is_public=True,
         metadata={"from": old_status, "to": new_status, "reason": reason},
+    )
+    from app.services.audit import log, AuditAction
+    action_map = {"resolved": AuditAction.TICKET_RESOLVE, "closed": AuditAction.TICKET_CLOSE}
+    audit_action = action_map.get(new_status, AuditAction.TICKET_STATUS_CHANGE)
+    await log(
+        db,
+        audit_action,
+        actor_id=actor_id,
+        actor_role=actor_role,
+        resource_type="tickets",
+        resource_id=ticket.id,
+        old_value={"status": old_status},
+        new_value={"status": new_status, "ticket_number": ticket.ticket_number, "reason": reason},
     )
     await db.flush()
 

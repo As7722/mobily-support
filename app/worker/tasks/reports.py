@@ -188,55 +188,88 @@ def _generate_pdf(html: str) -> bytes:
 @celery_app.task(name="reports.generate_scheduled", bind=True, max_retries=2)
 def generate_scheduled_report(
     self,
-    report_config_id: Optional[str] = None,
-    period: str = "weekly",
-    lang: str = "ar",
+    scheduled_report_id: Optional[str] = None,
+    period: Optional[str] = None,
+    lang: Optional[str] = None,
     recipients: Optional[list[str]] = None,
 ) -> dict:
-    """Generate and email a scheduled PDF report."""
+    """
+    Generate and email a scheduled report.
+    When scheduled_report_id is set, load config from DB (report_config, format, language, recipients).
+    Otherwise use legacy args: period, lang, recipients.
+    """
     return asyncio.get_event_loop().run_until_complete(
-        _generate_and_send(report_config_id, period, lang, recipients or [])
+        _generate_and_send_by_id(scheduled_report_id, period=period, lang=lang, recipients=recipients or [])
     )
 
 
-async def _generate_and_send(
-    config_id: Optional[str],
-    period: str,
-    lang: str,
-    recipients: list[str],
+async def _generate_and_send_by_id(
+    scheduled_report_id: Optional[str],
+    period: Optional[str] = None,
+    lang: Optional[str] = None,
+    recipients: Optional[list[str]] = None,
 ) -> dict:
     from app.core.config import settings
-    from app.services.kpi import get_manager_kpis
-    from app.services.email import send_email
+    from app.services.reports import gather_report_data, build_report_pdf, build_report_xlsx
 
+    row = None
     async for db in _get_db():
-        kpis   = await get_manager_kpis(db, None, period)
-        tickets: list[dict] = []  # TODO: fetch recent ticket list for the period
+        if scheduled_report_id:
+            from app.models.report import ScheduledReport
+            from sqlalchemy import select
 
-        period_label = {
-            "today": "Today / اليوم",
-            "weekly": "This Week / هذا الأسبوع",
-            "monthly": "This Month / هذا الشهر",
-        }.get(period, period)
+            result = await db.execute(
+                select(ScheduledReport).where(ScheduledReport.id == uuid.UUID(scheduled_report_id))
+            )
+            row = result.scalar_one_or_none()
+            if not row or not row.is_active:
+                return {"ok": False, "reason": "report not found or inactive"}
+            cfg = row.report_config or {}
+            report_type = cfg.get("report_type", "kpi_summary")
+            period = row.frequency
+            lang = row.language or "ar"
+            recipients = list(row.recipients or [])
+            fmt = (row.format or "pdf").lower()
+            name_ar = row.name_ar or "تقرير"
+            name_en = row.name_en or "Report"
+        else:
+            report_type = "kpi_summary"
+            period = period or "weekly"
+            lang = lang or "ar"
+            recipients = list(recipients or [])
+            fmt = "pdf"
+            name_ar = "تقرير"
+            name_en = "Report"
 
-        html = _render_pdf_html(kpis, tickets, lang, period_label)
-        pdf  = _generate_pdf(html)
+        if not recipients:
+            return {"ok": False, "recipients": 0}
 
-        # Attach PDF and send
-        import base64
+        period_map = {"daily": "today", "weekly": "week", "monthly": "month"}
+        report_period = period_map.get(period, "month")
+
+        data = await gather_report_data(db, report_type, report_period, None)
+        if fmt == "xlsx":
+            body = build_report_xlsx(data, report_type, lang)
+            filename = f"report_{report_period}.xlsx"
+        else:
+            body = build_report_pdf(data, report_type, lang)
+            filename = f"report_{report_period}.pdf"
+
         from email.mime.application import MIMEApplication
         from email.mime.multipart import MIMEMultipart
         from email.mime.text import MIMEText
         import aiosmtplib
 
+        subject = f"{name_ar} / {name_en} — {data.get('period_label_en', report_period)}"
         for recipient in recipients:
             msg = MIMEMultipart()
-            msg["From"]    = settings.SMTP_USER
-            msg["To"]      = recipient
-            msg["Subject"] = f"Mobily Support Report — {period_label}"
+            msg["From"] = settings.SMTP_USER
+            msg["To"] = recipient
+            msg["Subject"] = subject
             msg.attach(MIMEText("<p>Please find the attached report.</p>", "html"))
-            att = MIMEApplication(pdf, Name=f"report_{period}.pdf")
-            att["Content-Disposition"] = f'attachment; filename="report_{period}.pdf"'
+            subtype = "pdf" if fmt == "pdf" else "vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            att = MIMEApplication(body, _subtype=subtype)
+            att.add_header("Content-Disposition", "attachment", filename=filename)
             msg.attach(att)
             try:
                 await aiosmtplib.send(
@@ -251,7 +284,46 @@ async def _generate_and_send(
             except Exception as exc:
                 log.error("Failed to send report to %s: %s", recipient, exc)
 
+        if scheduled_report_id and row:
+            row.last_sent_at = datetime.now(UTC)
+            await db.commit()
+
     return {"ok": True, "recipients": len(recipients)}
+
+
+@celery_app.task(name="reports.run_scheduled_due")
+def run_scheduled_reports_due() -> dict:
+    """
+    Beat runs this daily at 07:00; enqueues generate_scheduled_report for each
+    active report whose frequency is due (daily=every day, weekly=Sunday, monthly=1st).
+    """
+    return asyncio.get_event_loop().run_until_complete(_run_due())
+
+
+async def _run_due() -> dict:
+    from app.models.report import ScheduledReport
+    from sqlalchemy import select
+
+    now = datetime.now(UTC)
+    due_ids: list[str] = []
+    async for db in _get_db():
+        result = await db.execute(
+            select(ScheduledReport).where(ScheduledReport.is_active.is_(True))
+        )
+        for row in result.scalars().all():
+            due = False
+            if row.frequency == "daily":
+                due = now.hour == 7
+            elif row.frequency == "weekly":
+                due = now.weekday() == 6 and now.hour == 7  # Sunday
+            elif row.frequency == "monthly":
+                due = now.day == 1 and now.hour == 7
+            if due:
+                due_ids.append(str(row.id))
+        break
+    for rid in due_ids:
+        generate_scheduled_report.delay(rid)
+    return {"ok": True, "queued": len(due_ids)}
 
 
 async def _get_db():

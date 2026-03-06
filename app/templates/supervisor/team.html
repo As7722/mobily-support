@@ -3,6 +3,9 @@
 {% block page_title %}{{ t('sup.team_title', lang=lang) }}{% endblock %}
 
 {% block content %}
+<div class="p-4 pb-6">
+  {% set hub_tab = 'team' %}
+  {% include 'supervisor/_tabs_nav.html' %}
 {% set _edit_branch = lang == 'ar' and 'تعديل الفرع' or 'Edit Branch' %}
 {% set _add_branch = lang == 'ar' and 'إضافة فرع جديد' or 'Add New Branch' %}
 {% set _save_changes = lang == 'ar' and 'حفظ التعديلات' or 'Save Changes' %}
@@ -233,7 +236,7 @@
             </tr>
           </thead>
           <tbody>
-            <template x-for="(branch, idx) in branches" :key="branch.id">
+            <template x-for="(branch, idx) in pageBranches" :key="branch.id">
               <tr class="hover:bg-blue-50/30 dark:hover:bg-blue-950/20 transition-colors cursor-default">
                 <td class="text-center text-xs" style="color:var(--text-faint);" x-text="(currentPage-1)*perPage + idx + 1"></td>
                 <td>
@@ -275,7 +278,7 @@
                 </td>
               </tr>
             </template>
-            <tr x-show="!loading && branches.length === 0">
+            <tr x-show="!loading && filteredBranches.length === 0">
               <td colspan="8" class="py-14 text-center">
                 <svg class="mx-auto h-12 w-12 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color:var(--text-faint);"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3H21m-3.75 3H21"/></svg>
                 <p class="text-sm font-bold" style="color:var(--text-muted);">{{ lang == 'ar' and 'لا توجد فروع تطابق البحث' or 'No branches match your search' }}</p>
@@ -424,7 +427,7 @@
               </tr>
             </thead>
             <tbody>
-              <template x-for="(emp, ei) in employees" :key="emp.id">
+              <template x-for="(emp, ei) in employeePage" :key="emp.id">
                 <tr class="hover:bg-blue-50/30 dark:hover:bg-blue-950/20 transition-colors">
                   <td class="text-center text-xs" style="color:var(--text-faint);" x-text="(empCurrentPage-1)*empPerPage + ei + 1"></td>
                   <td>
@@ -626,6 +629,7 @@
   </div>
 
 </div>
+</div>
 
 <script>
 window._branchData = {{ branches_json | safe }};
@@ -633,13 +637,62 @@ function branchManager() {
   return {
     branches: window._branchData || [],
     filteredBranches: [],
-    search: '', statusFilter: 'all', regionFilter: 'all', onlyWithEmployees: false,
+    search: '', statusFilter: 'all', regionFilter: 'all', cityFilter: 'all', onlyWithEmployees: false,
     showBranchModal: false, editingBranch: null, branchForm: {}, branchError: '', savingBranch: false,
     showEmployeesPanel: false, selectedBranch: null, employees: [], empSearch: '',
     showEmployeeModal: false, editingEmployee: null, empForm: {}, empError: '', savingEmployee: false,
     importMsg: '', importOk: false,
+    loading: false,
+    perPage: 50, currentPage: 1, totalPages: 1, totalBranches: 0, pageNumbers: [1],
+    totalEmployees: 0, empLoading: false, empPerPage: 50, empCurrentPage: 1, empTotalPages: 1, empPageNumbers: [1],
+    empStatusFilter: 'all',
 
-    init() { this.filteredBranches = this.branches; },
+    get pageBranches() {
+      var start = (this.currentPage - 1) * this.perPage;
+      return this.filteredBranches.slice(start, start + this.perPage);
+    },
+    get employeePage() {
+      var start = (this.empCurrentPage - 1) * this.empPerPage;
+      return this.employees.slice(start, start + this.empPerPage);
+    },
+
+    init() {
+      this.filteredBranches = this.branches;
+      this.loadBranches();
+    },
+    loadBranches() {
+      this.totalBranches = this.filteredBranches.length;
+      this.totalPages = Math.max(1, Math.ceil(this.totalBranches / this.perPage));
+      this.currentPage = Math.min(Math.max(1, this.currentPage), this.totalPages);
+      this.pageNumbers = Array.from({ length: this.totalPages }, function(_, i) { return i + 1; });
+    },
+    goPage(n) {
+      this.currentPage = n;
+    },
+    onSearchInput() {
+      this.filterBranches();
+      this.currentPage = 1;
+      this.loadBranches();
+    },
+    onFilterChange() {
+      this.filterBranches();
+      this.currentPage = 1;
+      this.loadBranches();
+    },
+    onEmpSearchInput() { /* client-side filter only; pagination unchanged */ },
+    onEmpFilterChange() {
+      this.empCurrentPage = 1;
+      this.loadEmployees();
+    },
+    loadEmployees() {
+      this.totalEmployees = this.employees.length;
+      this.empTotalPages = Math.max(1, Math.ceil(this.totalEmployees / this.empPerPage));
+      this.empCurrentPage = Math.min(Math.max(1, this.empCurrentPage), this.empTotalPages);
+      this.empPageNumbers = Array.from({ length: this.empTotalPages }, function(_, i) { return i + 1; });
+    },
+    empGoPage(n) {
+      this.empCurrentPage = n;
+    },
     filterBranches() {
       var self = this, s = self.search.toLowerCase();
       self.filteredBranches = self.branches.filter(function(b) {
@@ -654,11 +707,14 @@ function branchManager() {
           || (b.phone||'').toLowerCase().indexOf(s)>=0
           || (b.email||'').toLowerCase().indexOf(s)>=0;
         var mst = self.statusFilter==='all' || (self.statusFilter==='active'&&b.is_active) || (self.statusFilter==='inactive'&&!b.is_active);
-        var branchRegion = (b.region_{{ lang }} || b.region_ar || b.region_en || '');
+        var branchRegion = (b.region_ar || b.region_en || '');
         var mr = self.regionFilter === 'all' || branchRegion === self.regionFilter;
+        var branchCity = (b.city_ar || b.city_en || '');
+        var mc = self.cityFilter === 'all' || branchCity === self.cityFilter;
         var me = !self.onlyWithEmployees || (b.employee_count || 0) > 0;
-        return ms && mst && mr && me;
+        return ms && mst && mr && mc && me;
       });
+      this.loadBranches();
     },
     get filteredEmployees() {
       var s = this.empSearch.toLowerCase();
@@ -695,8 +751,24 @@ function branchManager() {
       fetch('/api/supervisor/branches/'+b.id+'/toggle',{method:'POST'}).then(function(r){return r.json();}).then(function(d){if(d.ok)location.reload();});
     },
     viewEmployees(branch) {
-      var self=this; self.selectedBranch=branch; self.employees=[]; self.empSearch=''; self.showEmployeesPanel=true;
-      fetch('/api/supervisor/branches/'+branch.id+'/employees').then(function(r){return r.json();}).then(function(d){self.employees=d.employees||[];});
+      var self = this;
+      self.selectedBranch = branch;
+      self.employees = [];
+      self.empSearch = '';
+      self.showEmployeesPanel = true;
+      self.empLoading = true;
+      self.totalEmployees = 0;
+      self.empCurrentPage = 1;
+      self.empTotalPages = 1;
+      self.empPageNumbers = [1];
+      fetch('/api/supervisor/branches/' + branch.id + '/employees')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          self.employees = d.employees || [];
+          self.empLoading = false;
+          self.loadEmployees();
+        })
+        .catch(function() { self.empLoading = false; self.loadEmployees(); });
     },
     quickAddEmployee(branch) {
       var self=this;

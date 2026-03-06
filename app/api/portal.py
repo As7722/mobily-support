@@ -322,6 +322,19 @@ async def register_employee_request(
         actor_type="system",
         is_public=False,
     )
+
+    from app.services.audit import log_from_request, AuditAction
+    await log_from_request(
+        db, request, AuditAction.PORTAL_REGISTER_EMPLOYEE,
+        resource_type="tickets", resource_id=ticket.id,
+        new_value={
+            "ticket_number": ticket_number,
+            "submitter_name": emp_name,
+            "submitter_phone": emp_phone[:20] if emp_phone else None,
+            "employee_id": emp_id[:50] if emp_id else None,
+        },
+    )
+
     await db.commit()
 
     msg = (
@@ -380,6 +393,14 @@ async def track_ticket(
     ticket = result.scalar_one_or_none()
     if not ticket:
         return JSONResponse({"found": False})
+
+    from app.services.audit import log_from_request, AuditAction
+    await log_from_request(
+        db, request, AuditAction.PORTAL_TRACK,
+        resource_type="tickets", resource_id=ticket.id,
+        new_value={"ticket_number": ticket.ticket_number, "lookup": (q or "")[:100]},
+    )
+    await db.commit()
 
     # Iron Rule #3: Only status + public replies visible to customers
     REPLY_TYPES = {"reply_external", "reply_customer"}
@@ -497,6 +518,23 @@ async def submit_ticket(
 
     ticket = await create_ticket(db, redis, form, submitter_user_id=submitter_user_id)
 
+    from app.services.audit import log, AuditAction
+    actor_id = None
+    if submitter_user_id:
+        try:
+            actor_id = uuid.UUID(submitter_user_id) if isinstance(submitter_user_id, str) else submitter_user_id
+        except (ValueError, TypeError):
+            pass
+    await log(
+        db,
+        AuditAction.TICKET_CREATE,
+        actor_id=actor_id,
+        actor_ip=request.client.host if request.client else None,
+        resource_type="tickets",
+        resource_id=ticket.id,
+        new_value={"ticket_number": ticket.ticket_number, "source": "portal"},
+    )
+
     if branch_employee_id:
         try:
             from app.models.branch import BranchEmployee
@@ -527,6 +565,74 @@ async def submit_ticket(
         if dept_obj:
             ticket.current_queue = "specialized"
             ticket.sub_queue_dept_id = dept_obj.id
+
+    # Save attachments for new ticket (linked to CREATED timeline event)
+    if attachments:
+        import os
+        import aiofiles
+        import re as _re
+        from sqlalchemy import desc
+        from app.models.ticket_timeline import TicketAttachment
+        from app.core.config import settings
+
+        created_ev_result = await db.execute(
+            select(TicketTimeline)
+            .where(
+                TicketTimeline.ticket_id == ticket.id,
+                TicketTimeline.event_type == EventType.CREATED,
+            )
+            .order_by(desc(TicketTimeline.created_at))
+            .limit(1)
+        )
+        created_event = created_ev_result.scalar_one_or_none()
+        if created_event:
+            MAX_SIZE = 10 * 1024 * 1024  # 10 MB
+            ALLOWED = {
+                "image/jpeg", "image/png", "image/gif", "image/webp",
+                "application/pdf",
+                "application/msword",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "application/vnd.ms-excel",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "application/zip", "text/plain",
+            }
+            allowed_ext = {".pdf", ".jpg", ".jpeg", ".png", ".gif", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".txt"}
+            upload_dir = settings.ticket_uploads_path
+            os.makedirs(upload_dir, exist_ok=True)
+            for upl in attachments:
+                if not getattr(upl, "filename", None) or not upl.filename.strip():
+                    continue
+                try:
+                    data = await upl.read()
+                except Exception:
+                    continue
+                if len(data) > MAX_SIZE:
+                    continue
+                ct = getattr(upl, "content_type", None) or "application/octet-stream"
+                if ct not in ALLOWED:
+                    continue
+                clean_name = os.path.basename(upl.filename or "file")
+                ext = os.path.splitext(clean_name)[1]
+                if ext.lower() not in allowed_ext:
+                    ext = ".bin"
+                file_key = f"{uuid.uuid4().hex}{ext}"
+                file_path = os.path.join(str(upload_dir), file_key)
+                try:
+                    async with aiofiles.open(file_path, "wb") as f:
+                        await f.write(data)
+                except Exception:
+                    continue
+                att = TicketAttachment(
+                    id=uuid.uuid4(),
+                    ticket_id=ticket.id,
+                    timeline_id=created_event.id,
+                    file_name=upl.filename,
+                    file_size=len(data),
+                    mime_type=ct,
+                    s3_key=f"local/{file_key}",
+                    s3_bucket="local",
+                )
+                db.add(att)
 
     try:
         await db.commit()
@@ -563,6 +669,14 @@ async def public_ticket_view(
     ticket = result.scalar_one_or_none()
     if not ticket:
         raise HTTPException(404)
+
+    from app.services.audit import log_from_request, AuditAction
+    await log_from_request(
+        db, request, AuditAction.PORTAL_VIEW,
+        resource_type="tickets", resource_id=ticket.id,
+        new_value={"ticket_number": ticket.ticket_number},
+    )
+    await db.commit()
 
     # Iron Rule #3: Only public replies visible to customer (no timeline, no routing)
     all_public = await get_public_timeline(db, ticket.id)
@@ -617,6 +731,18 @@ async def customer_reply(
         is_public=True,
     )
 
+    from app.services.audit import log_from_request, AuditAction
+    await log_from_request(
+        db, request, AuditAction.PORTAL_REPLY,
+        resource_type="tickets", resource_id=ticket.id,
+        new_value={
+            "ticket_number": ticket.ticket_number,
+            "source": "portal",
+            "content_length": len((content or "").strip()),
+            "has_attachment": bool(attachment and attachment.filename),
+        },
+    )
+
     # Handle optional attachment
     if attachment and attachment.filename:
         MAX_SIZE = 10 * 1024 * 1024  # 10 MB
@@ -631,7 +757,8 @@ async def customer_reply(
         }
         data = await attachment.read()
         if len(data) <= MAX_SIZE and attachment.content_type in ALLOWED:
-            upload_dir = "/app/uploads/tickets"
+            from app.core.config import settings
+            upload_dir = settings.ticket_uploads_path
             os.makedirs(upload_dir, exist_ok=True)
             import re as _re
             clean_name = os.path.basename(attachment.filename or "file")
@@ -640,7 +767,7 @@ async def customer_reply(
             if ext.lower() not in allowed_ext:
                 ext = ".bin"
             file_key = f"{uuid.uuid4().hex}{ext}"
-            file_path = os.path.join(upload_dir, file_key)
+            file_path = os.path.join(str(upload_dir), file_key)
             async with aiofiles.open(file_path, "wb") as f:
                 await f.write(data)
             att = TicketAttachment(
@@ -662,6 +789,7 @@ async def customer_reply(
         ticket.last_opened_at = now
         ticket.updated_at = now
     await db.flush()
+    await db.commit()
 
     # Return updated public timeline partial
     tl = await get_public_timeline(db, ticket.id)
@@ -669,6 +797,76 @@ async def customer_reply(
         "portal/_timeline_partial.html",
         _tpl_ctx(request, timeline=tl, ticket=ticket),
     )
+
+
+# ── GET /api/portal/tickets/{token}/attachments/{att_id} ─────────────────────
+
+@router.get("/api/portal/tickets/{token}/attachments/{att_id}")
+async def portal_download_attachment(
+    token: str,
+    att_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Download a ticket attachment by public token (no agent auth required)."""
+    import os
+    from fastapi.responses import FileResponse
+
+    from app.models.ticket_timeline import TicketAttachment
+    from app.core.config import settings
+
+    try:
+        att_uuid = uuid.UUID(att_id)
+    except ValueError:
+        raise HTTPException(404)
+
+    ticket_result = await db.execute(
+        select(Ticket).where(
+            Ticket.public_token == token,
+            Ticket.deleted_at.is_(None),
+        )
+    )
+    ticket = ticket_result.scalar_one_or_none()
+    if not ticket:
+        raise HTTPException(404)
+
+    att_result = await db.execute(
+        select(TicketAttachment).where(
+            TicketAttachment.id == att_uuid,
+            TicketAttachment.ticket_id == ticket.id,
+        )
+    )
+    att = att_result.scalar_one_or_none()
+    if not att:
+        raise HTTPException(404)
+
+    from app.core.config import BASE_DIR
+
+    if not att.s3_key or not att.s3_key.strip():
+        raise HTTPException(404, "File not available")
+    raw_key = att.s3_key.replace("\\", "/").strip()
+    key_suffix = raw_key[6:].lstrip("/") if raw_key.startswith("local/") else raw_key.lstrip("/")
+    if not key_suffix:
+        raise HTTPException(404, "File not available")
+
+    def _try_path(path: str):
+        if path and os.path.exists(path):
+            return FileResponse(
+                path,
+                media_type=att.mime_type or "application/octet-stream",
+                filename=att.file_name,
+            )
+        return None
+
+    r = _try_path(str(settings.ticket_uploads_path / key_suffix))
+    if r is not None:
+        return r
+    r = _try_path(str(BASE_DIR / "uploads" / "tickets" / key_suffix))
+    if r is not None:
+        return r
+    r = _try_path(os.path.join("/app", "uploads", "tickets", key_suffix))
+    if r is not None:
+        return r
+    raise HTTPException(404, "File not available")
 
 
 # ── GET /csat/{token} ─────────────────────────────────────────────────────────
@@ -757,6 +955,20 @@ async def csat_submit(
                     content_en=f"CSAT received — {rating_overall}/5",
                     actor_type="customer",
                     is_public=False,
+                )
+
+                from app.services.audit import log_from_request, AuditAction
+                await log_from_request(
+                    db, request, AuditAction.PORTAL_CSAT_SUBMIT,
+                    resource_type="tickets", resource_id=ticket.id,
+                    new_value={
+                        "ticket_number": ticket.ticket_number,
+                        "rating_overall": rating_overall,
+                        "rating_speed": rating_speed,
+                        "rating_professionalism": rating_professionalism,
+                        "rating_clarity": rating_clarity,
+                        "has_comments": bool(comments and comments.strip()),
+                    },
                 )
 
     return JSONResponse({"ok": True})
