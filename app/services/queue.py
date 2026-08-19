@@ -7,6 +7,10 @@ Priority score formula (0-100):
   wait_ratio  × 20   — minutes waiting / 480 (one full business day), capped 1.0
   reopen_wt   × 10   — penalise reopened tickets (capped at 1 reopen)
 Total max ≈ 100; higher = more urgent / should appear first.
+
+SECURITY IMPROVEMENTS:
+- Pessimistic locking in claim_ticket to prevent race conditions
+- Proper exception handling
 """
 from __future__ import annotations
 
@@ -148,19 +152,28 @@ async def claim_ticket(
     ticket_id: uuid.UUID,
     agent_id: uuid.UUID,
 ) -> Ticket:
-    """Assign a ticket to the claiming agent atomically."""
+    """
+    Assign a ticket to the claiming agent atomically.
+    
+    SECURITY FIX: Uses pessimistic locking (SELECT FOR UPDATE) to prevent
+    race conditions where two agents claim the same ticket simultaneously.
+    """
     from datetime import datetime, timezone
     from app.services.timeline import add_event, EventType
 
+    # ✅ SECURITY FIX: Use pessimistic locking with FOR UPDATE
+    # This prevents two concurrent requests from both claiming the same ticket
     result = await db.execute(
         select(Ticket).where(
             Ticket.id == ticket_id,
             Ticket.deleted_at.is_(None),
             Ticket.assigned_to.is_(None),  # only claim if unassigned
-        )
+        ).with_for_update()  # ✅ CRITICAL: Lock the row until transaction completes
     )
     ticket = result.scalar_one_or_none()
+    
     if not ticket:
+        # Double-check: ticket might be assigned to this agent already
         result2 = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
         ticket = result2.scalar_one_or_none()
         if ticket and ticket.assigned_to == agent_id:
